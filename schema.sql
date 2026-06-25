@@ -24,3 +24,17 @@ CREATE TABLE IF NOT EXISTS snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_snapshots_trend_date ON snapshots (trend_id, captured_date);
 CREATE INDEX IF NOT EXISTS idx_trends_category ON trends (category);
+
+CREATE TABLE IF NOT EXISTS metrics (
+    id              SERIAL PRIMARY KEY,
+    trend_id        INTEGER NOT NULL REFERENCES trends(id),
+    computed_date   DATE NOT NULL,
+    smoothed_count  DOUBLE PRECISION,
+    velocity        DOUBLE PRECISION,   -- relative growth/day; null if < 4 snapshots or zero base
+    acceleration    DOUBLE PRECISION,   -- null if < 5 snapshots
+    stage           TEXT NOT NULL,      -- new / rising / cresting / declining / dormant
+    snapshot_count  INTEGER NOT NULL,   -- how many snapshots fed this computation
+    UNIQUE (trend_id, computed_date)    -- one metrics row per trend per day; reruns idempotent
+);
+
+CREATE INDEX IF NOT EXISTS idx_metrics_date_stage ON metrics (computed_date, stage);

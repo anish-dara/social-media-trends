@@ -13,7 +13,7 @@ written) once TikTok ships that data. See PROJECT_PLAN.md.
 import datetime
 from collections import Counter
 
-from src import categorize, db, normalize, tiktok_client
+from src import categorize, compute_metrics, db, normalize, tiktok_client
 
 COUNTRY = "US"
 HASHTAG_LIMIT = 30
@@ -21,7 +21,11 @@ DEMOGRAPHICS_TOP_N = 20
 
 
 def run(captured_date=None):
-    captured_date = captured_date or datetime.date.today()
+    # UTC, not local time: the project's day boundary is the 06:00 UTC cron
+    # (PROJECT_PLAN.md sec 14), so local-time date.today() would disagree
+    # with the GitHub Actions runner (which is UTC) by several hours
+    # depending on where this is run from.
+    captured_date = captured_date or datetime.datetime.now(datetime.timezone.utc).date()
 
     raw_hashtags = tiktok_client.get_trending_hashtags(limit=HASHTAG_LIMIT, country_code=COUNTRY)
     records = normalize.normalize_hashtags(raw_hashtags, country=COUNTRY)
@@ -52,6 +56,10 @@ def run(captured_date=None):
                 "trend_direction": r["trend_direction"],
                 "raw_json": r["raw"],
             })
+
+        # Metrics compute runs after ingestion so today's snapshot is
+        # included (see CLAUDE_CODE_PHASE2.md sec 6 -- order is non-negotiable).
+        metric_results = compute_metrics.compute_and_store(conn, computed_date=captured_date)
     finally:
         conn.close()
 
@@ -59,6 +67,11 @@ def run(captured_date=None):
     print(f"Pipeline run for {captured_date}: {len(records)} trends captured")
     for category, count in counts.most_common():
         print(f"  {category:<10} {count}")
+
+    stage_counts = Counter(m["stage"] for m in metric_results)
+    print("Stages:")
+    for stage, count in stage_counts.most_common():
+        print(f"  {stage:<10} {count}")
 
     return records
 

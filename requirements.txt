@@ -3,3 +3,4 @@ psycopg[binary]
 anthropic
 streamlit
 python-dotenv
+pytest
