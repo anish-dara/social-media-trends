@@ -101,16 +101,25 @@ Built as a ladder:
   panels / emergency kits. Trends with no retail angle correctly return empty
   rather than forcing a stretch. Runs in the daily pipeline, isolated so an
   LLM/JSON failure can't break ingestion or metrics.
-- **Tier 2 — named product/brand mentions (blocked, not built).** Would mine
-  the top videos' captions per hashtag for concrete product/brand mentions.
-  The only source for that caption text is TikTok's `GetHashtagDetail`
-  endpoint, which is **login-gated** (returns `InvalidLogin` anonymously), and
-  the public TikTok tag pages are bot-challenge-walled. The data we collect
-  anonymously (the hashtag list) carries no caption text. A logged-in
-  Creative Center session *can* reach it, but those cookies expire in ~3 days,
-  so Tier 2 can't live in the unattended daily cron — if built, it would be a
-  manual, locally-run enrichment step using a fresh login, separate from the
-  hands-off daily job. Deferred pending that decision or a data source.
+- **Tier 2 — named product/brand mentions (built; manual step).** Mines the
+  top videos' captions per hashtag for concrete product/brand mentions (e.g.
+  "people are using Stanley Quencher tumblers"). Captions come via a two-hop
+  path, since no single endpoint gives them anonymously:
+  1. **`GetHashtagDetail`** (login-gated) returns a hashtag's top **video
+     URLs**. Its `videoList` carries URLs + stats but, confirmed by a
+     logged-in capture, **no caption text**.
+  2. **TikTok's public oEmbed endpoint** (`/oembed?url=<videoURL>`, no login,
+     no key) turns each video URL into its caption (the `title` field).
+
+  Because step 1 needs a logged-in session and those cookies expire in ~3
+  days, Tier 2 is **not in the unattended cron** — it's a manual local step,
+  `python -m src.enrich_tier2`, run when you have a fresh login. It reads
+  `TIKTOK_COOKIE` / `TIKTOK_CSRF` from `.env` (gitignored — cookies never go
+  in git), enriches the top ~20 hashtags by persistence, and writes
+  `named_products` to `trend_products`. Tier 1 and the daily cron are
+  unaffected if it's never run. The no-login halves (oEmbed fetch + LLM
+  extraction) are verified live; the login half runs against the confirmed
+  `GetHashtagDetail` shape.
 
 ### Deferred
 
@@ -132,8 +141,10 @@ Built as a ladder:
 - `src/metrics.py` — pure velocity/acceleration/stage math, no DB access.
 - `src/compute_metrics.py` — loads snapshot history, runs `metrics.py`,
   upserts the `metrics` table.
-- `src/products.py` — Tier 1 retail-category inference (LLM), reused
-  `claude-sonnet-4-6`; Tier 2 (named products) deferred — see above.
+- `src/products.py` — Tier 1 retail-category inference + Tier 2 named-product
+  extraction (LLM), reused `claude-sonnet-4-6`.
+- `src/enrich_tier2.py` — manual Tier 2 entry point (login-fed, runs outside
+  the cron); see the Tier 2 note above.
 - `src/db.py` — also holds `get_window_trends()` (persistence windows) and
   `upsert_trend_products()`.
 - `src/pipeline.py` — orchestrates one daily run end to end: ingest → compute

@@ -75,6 +75,43 @@ def infer_product_categories(trend_names):
     return results
 
 
+TIER2_SYSTEM_PROMPT = (
+    "You extract concrete product and brand mentions from TikTok video captions. "
+    "Given captions for videos under one hashtag, return ONLY a JSON object "
+    '{"named_products": [{"product": "...", "brand": "...", "mentions": N}]}. '
+    "Count how many captions mention each product. Use an empty string for brand "
+    "if no brand is named. If the captions mention no concrete products, return "
+    'an empty list. No prose, no markdown fences -- be conservative, do not '
+    "invent products that aren't actually referenced."
+)
+
+
+def extract_named_products(captions):
+    """
+    captions: list of caption strings for one hashtag's top videos.
+    Returns a list of {"product", "brand", "mentions"} dicts. Degrades
+    gracefully: empty/whitespace input returns [] without an API call (don't
+    pay for a guaranteed-empty extraction), and any parse failure returns [].
+    """
+    text = "\n".join(c.strip() for c in captions if c and c.strip())
+    if not text:
+        return []
+
+    response = _client.messages.create(
+        model=MODEL,
+        max_tokens=1500,
+        system=TIER2_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": "Captions:\n" + text}],
+    )
+    raw_text = response.content[0].text.strip()
+    try:
+        parsed = json.loads(raw_text)
+        named = parsed.get("named_products", [])
+        return named if isinstance(named, list) else []
+    except (json.JSONDecodeError, AttributeError):
+        return []
+
+
 def compute_and_store_tier1(conn, generated_date, top_n=PRODUCT_TOP_N):
     """
     Selects the top `top_n` active trends (by persistence over

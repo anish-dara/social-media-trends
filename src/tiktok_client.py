@@ -129,6 +129,65 @@ def get_hashtag_demographics(tiktok_id):
     return None
 
 
+# --- Tier 2 caption path (manual, login-fed -- NOT part of the daily cron) ---
+#
+# GetHashtagDetail is login-gated and its videoList carries video URLs but NO
+# caption text (confirmed by a logged-in DevTools capture, 2026-06-27). So
+# captions come in two hops: (1) this call, with the caller's own session
+# cookies, returns the top videos' URLs for a hashtag; (2) get_video_caption()
+# turns each URL into its caption via TikTok's public, no-login oEmbed
+# endpoint. Cookies expire in ~3 days, so step 1 can't live in the unattended
+# cron -- this is a manual local enrichment step (see src/enrich_tier2.py).
+
+OEMBED_URL = "https://www.tiktok.com/oembed"
+
+
+def get_hashtag_video_urls(hashtag_id, cookie_header, csrf_token, time_range=90):
+    """
+    Top videos' URLs for one hashtag, via the login-gated GetHashtagDetail.
+    `cookie_header` is the raw Cookie string from a logged-in Creative Center
+    session; `csrf_token` is the csrftoken cookie's value (sent as X-CSRFToken).
+    Returns a list of video URL strings (may be empty). Raises on a non-200 or
+    an InvalidLogin BaseResp so the caller can report a stale/absent session
+    clearly rather than silently producing nothing.
+    """
+    headers = {
+        **HEADERS,
+        "agw-js-conv": "str",
+        "x-csrftoken": csrf_token,
+        "cookie": cookie_header,
+    }
+    resp = httpx.post(
+        f"{BASE_URL}/GetHashtagDetail",
+        headers=headers,
+        json={"hashtagID": str(hashtag_id), "timeRange": time_range, "countryCode": "US"},
+        timeout=15.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    base = data.get("BaseResp", {})
+    if base.get("StatusCode") not in (0, None):
+        raise RuntimeError(f"GetHashtagDetail returned {base.get('StatusMessage')!r} "
+                           f"(login likely expired or missing)")
+    return [v.get("videoURL") for v in data.get("videoList", []) if v.get("videoURL")]
+
+
+def get_video_caption(video_url):
+    """
+    The caption for one TikTok video URL, via the public oEmbed endpoint
+    (no login, no key). Returns the caption string, or None if the video is
+    private/removed/unavailable. Confirmed live 2026-06-27: oEmbed's `title`
+    field is the full caption including hashtags.
+    """
+    try:
+        resp = httpx.get(OEMBED_URL, params={"url": video_url}, timeout=15.0)
+        if resp.status_code != 200:
+            return None
+        return resp.json().get("title")
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
 if __name__ == "__main__":
     hashtags = get_trending_hashtags(limit=30)
     print(f"Got {len(hashtags)} hashtags\n")
