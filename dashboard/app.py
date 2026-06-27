@@ -12,12 +12,18 @@ from pathlib import Path
 # root, so `from src import ...` fails unless we add the root ourselves.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import datetime
+
 import streamlit as st
 
 from src import db
+from src.categorize import TAXONOMY
 
 STAGE_EMOJI = {"new": "⚪", "rising": "\U0001f7e2", "cresting": "\U0001f7e1",
                "declining": "\U0001f534", "dormant": "⚫"}
+STAGES = ["new", "rising", "cresting", "declining", "dormant"]
+SORT_OPTIONS = {"Persistence": "persistence", "Velocity": "velocity",
+                 "Metric": "metric", "Rank": "rank"}
 
 
 def _display(records):
@@ -37,25 +43,56 @@ with trends_tab:
     if latest_date is None:
         st.info("No snapshots yet -- run `python -m src.pipeline` to capture today's trends.")
     else:
-        st.caption(f"Showing trends captured on {latest_date}")
+        st.caption(f"Latest capture: {latest_date} · platform: tiktok (more platforms planned for Phase 4)")
 
-        rows = conn.execute(
-            """
-            SELECT
-                t.id, t.name, t.category, t.demographics,
-                s.rank, s.video_count, s.view_count,
-                m.stage, m.velocity, m.acceleration,
-                (SELECT COUNT(DISTINCT captured_date) FROM snapshots s2 WHERE s2.trend_id = t.id) AS days_tracked
-            FROM snapshots s
-            JOIN trends t ON t.id = s.trend_id
-            LEFT JOIN metrics m ON m.trend_id = t.id AND m.computed_date = s.captured_date
-            WHERE s.captured_date = %s
-            ORDER BY s.rank
-            """,
-            (latest_date,),
-        ).fetchall()
+        filter_cols = st.columns(5)
+        with filter_cols[0]:
+            window_choice = st.selectbox("Window", ["Daily", "Weekly", "Monthly", "Past N days", "Date range"])
+        if window_choice == "Daily":
+            window_days = 1
+        elif window_choice == "Weekly":
+            window_days = 7
+        elif window_choice == "Monthly":
+            window_days = 30
+        elif window_choice == "Past N days":
+            with filter_cols[0]:
+                window_days = st.number_input("N", min_value=1, max_value=365, value=14)
+        else:  # Date range
+            with filter_cols[0]:
+                start_date = st.date_input("From", value=latest_date - datetime.timedelta(days=13),
+                                            max_value=latest_date)
+            window_days = max((latest_date - start_date).days + 1, 1)
 
-        trend_ids = [row[0] for row in rows]
+        with filter_cols[1]:
+            category_choice = st.selectbox("Category", ["All"] + TAXONOMY)
+        with filter_cols[2]:
+            type_choice = st.selectbox("Type", ["All", "hashtag", "sound"])
+        with filter_cols[3]:
+            stage_choice = st.selectbox("Stage", ["All"] + STAGES)
+        with filter_cols[4]:
+            sort_choice = st.selectbox("Sort by", list(SORT_OPTIONS.keys()))
+
+        results = db.get_window_trends(
+            conn, window_days,
+            category=None if category_choice == "All" else category_choice,
+            trend_type=None if type_choice == "All" else type_choice,
+            stage=None if stage_choice == "All" else stage_choice,
+            sort_by=SORT_OPTIONS[sort_choice],
+        )
+
+        effective_window = results[0]["effective_window"] if results else window_days
+        st.caption(
+            f"{len(results)} trends · window: {effective_window} day"
+            f"{'s' if effective_window != 1 else ''}"
+            + (f" (asked for {window_days}, but only {effective_window} days collected so far)"
+               if effective_window < window_days else "")
+        )
+        st.caption(
+            "Tip: Stage = rising + Sort by = Persistence surfaces trends that are "
+            "both durable (show up consistently) and currently accelerating."
+        )
+
+        trend_ids = [r["id"] for r in results]
         history_rows = conn.execute(
             "SELECT trend_id, smoothed_count FROM metrics WHERE trend_id = ANY(%s) ORDER BY computed_date",
             (trend_ids,),
@@ -66,56 +103,33 @@ with trends_tab:
                 history_by_trend.setdefault(trend_id, []).append(smoothed)
 
         records = []
-        for trend_id, name, category, demographics, rank, video_count, view_count, stage, velocity, acceleration, days_tracked in rows:
-            stage = stage or "new"
-            if velocity is None:
-                velocity_display = f"history building -- {days_tracked} day{'s' if days_tracked != 1 else ''} tracked"
+        for r in results:
+            if r["velocity"] is None:
+                velocity_display = "history building"
             else:
-                velocity_display = f"{velocity:+.1%}/day"
-
+                velocity_display = f"{r['velocity']:+.1%}/day"
             records.append({
-                "rank": rank,
-                "name": name,
-                "category": category or "other",
-                "stage": f"{STAGE_EMOJI.get(stage, '')} {stage}",
+                "name": r["name"],
+                "category": r["category"] or "other",
+                "stage": f"{STAGE_EMOJI.get(r['stage'], '')} {r['stage']}",
                 "velocity": velocity_display,
-                "smoothed_history": history_by_trend.get(trend_id, []),
-                "video_count": video_count,
-                "view_count": view_count,
-                "_stage_raw": stage,
-                "_velocity_raw": velocity,
+                "persistence": f"{r['days_present']}/{r['effective_window']} days",
+                "rank": r["rank"],
+                "primary_metric": r["primary_metric"],
+                "smoothed_history": history_by_trend.get(r["id"], []),
             })
 
-        categories = ["All"] + sorted({r["category"] for r in records})
-        selected = st.selectbox("Category", categories)
-        filtered = records if selected == "All" else [r for r in records if r["category"] == selected]
-
-        st.subheader("Today's trends")
         st.dataframe(
-            _display(filtered),
+            _display(records),
             width="stretch",
             hide_index=True,
             column_config={"smoothed_history": st.column_config.LineChartColumn("Smoothed history")},
         )
 
-        st.subheader("Rising now")
-        rising = sorted(
-            (r for r in records if r["_stage_raw"] == "rising"),
-            key=lambda r: r["_velocity_raw"],
-            reverse=True,
-        )
-        if rising:
-            st.dataframe(
-                _display(rising),
-                width="stretch",
-                hide_index=True,
-                column_config={"smoothed_history": st.column_config.LineChartColumn("Smoothed history")},
-            )
-        else:
-            st.write("Nothing is rising yet -- history is still building (see stage badges above).")
-
         with st.expander("Age demographics"):
-            with_demographics = [(name, demographics) for _id, name, _c, demographics, *_ in rows if demographics]
+            with_demographics = conn.execute(
+                "SELECT name, demographics FROM trends WHERE demographics IS NOT NULL"
+            ).fetchall()
             if with_demographics:
                 for name, demographics in with_demographics:
                     st.write(name, demographics)

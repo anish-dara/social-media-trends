@@ -71,3 +71,84 @@ def insert_snapshot(conn, trend_id, snapshot):
             },
         )
     conn.commit()
+
+
+# Sort options for get_window_trends, whitelisted so sort_by can't be used to
+# inject arbitrary SQL into ORDER BY.
+_WINDOW_SORTS = {
+    "persistence": "days_present DESC, velocity DESC NULLS LAST",
+    "velocity": "velocity DESC NULLS LAST",
+    "metric": "primary_metric DESC NULLS LAST",
+    "rank": "rank ASC NULLS LAST",
+}
+
+
+def get_window_trends(conn, window_days, category=None, trend_type=None, stage=None, sort_by="persistence"):
+    """
+    Trends appearing at least once in the last `window_days` calendar days
+    (the union over the window, not the intersection -- CLAUDE_CODE_PHASE3.md
+    sec 2.1), each with `days_present` (distinct days seen in the window) and
+    a cold-start-honest `effective_window` = min(window_days, total distinct
+    days collected so far) so early trends don't get penalized for days
+    before collection even started (sec 2.2). `platform` is hardcoded to
+    'tiktok' for now -- there's only one platform until Phase 4 -- and
+    `primary_metric` aliases `video_count` so the shape matches what a future
+    multi-platform column would look like, without adding that column before
+    it's needed.
+    """
+    sort_clause = _WINDOW_SORTS.get(sort_by, _WINDOW_SORTS["persistence"])
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(DISTINCT captured_date) FROM snapshots")
+        days_collected = cur.fetchone()[0] or 0
+    effective_window = max(min(window_days, days_collected), 1)
+
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            WITH window_bounds AS (
+                SELECT MAX(captured_date) AS latest_date FROM snapshots
+            ),
+            in_window AS (
+                SELECT s.trend_id, COUNT(DISTINCT s.captured_date) AS days_present
+                FROM snapshots s, window_bounds wb
+                WHERE s.captured_date > wb.latest_date - %(window_days)s
+                GROUP BY s.trend_id
+            )
+            SELECT
+                t.id, t.name, t.type, t.category, 'tiktok' AS platform,
+                iw.days_present,
+                latest.rank, latest.video_count AS primary_metric,
+                COALESCE(m.stage, 'new') AS stage, m.velocity, m.acceleration
+            FROM in_window iw
+            JOIN trends t ON t.id = iw.trend_id
+            JOIN LATERAL (
+                SELECT rank, video_count, captured_date
+                FROM snapshots s2
+                WHERE s2.trend_id = t.id
+                ORDER BY captured_date DESC
+                LIMIT 1
+            ) latest ON true
+            LEFT JOIN metrics m ON m.trend_id = t.id AND m.computed_date = latest.captured_date
+            WHERE (%(category)s::text IS NULL OR t.category = %(category)s::text)
+              AND (%(trend_type)s::text IS NULL OR t.type = %(trend_type)s::text)
+              AND (%(stage)s::text IS NULL OR COALESCE(m.stage, 'new') = %(stage)s::text)
+            ORDER BY {sort_clause}
+            """,
+            {
+                "window_days": window_days,
+                "category": category,
+                "trend_type": trend_type,
+                "stage": stage,
+            },
+        )
+        columns = [desc[0] for desc in cur.description]
+        rows = cur.fetchall()
+
+    results = []
+    for row in rows:
+        record = dict(zip(columns, row))
+        record["effective_window"] = effective_window
+        record["persistence_ratio"] = record["days_present"] / effective_window
+        results.append(record)
+    return results

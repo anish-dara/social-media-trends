@@ -38,3 +38,8 @@ CREATE TABLE IF NOT EXISTS metrics (
 );
 
 CREATE INDEX IF NOT EXISTS idx_metrics_date_stage ON metrics (computed_date, stage);
+
+-- Phase 3 Workstream A: persistence windows scan snapshots by date across
+-- ALL trends, unlike the (trend_id, captured_date) index above which is
+-- keyed per-trend. See CLAUDE_CODE_PHASE3.md sec 2.3.
+CREATE INDEX IF NOT EXISTS idx_snapshots_captured_date ON snapshots (captured_date);
