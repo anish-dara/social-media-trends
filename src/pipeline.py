@@ -13,7 +13,7 @@ written) once TikTok ships that data. See PROJECT_PLAN.md.
 import datetime
 from collections import Counter
 
-from src import categorize, compute_metrics, db, normalize, tiktok_client
+from src import categorize, compute_metrics, db, normalize, products, tiktok_client
 
 COUNTRY = "US"
 HASHTAG_LIMIT = 30
@@ -60,6 +60,15 @@ def run(captured_date=None):
         # Metrics compute runs after ingestion so today's snapshot is
         # included (see CLAUDE_CODE_PHASE2.md sec 6 -- order is non-negotiable).
         metric_results = compute_metrics.compute_and_store(conn, computed_date=captured_date)
+
+        # Product inference runs last and is isolated: a failure here (LLM
+        # hiccup, bad JSON) must never break ingestion/metrics, which already
+        # succeeded by this point (CLAUDE_CODE_PHASE3.md sec 3.4).
+        try:
+            products_processed = products.compute_and_store_tier1(conn, generated_date=captured_date)
+        except Exception as e:
+            print(f"Product inference FAILED (ingestion/metrics unaffected): {e}")
+            products_processed = 0
     finally:
         conn.close()
 
@@ -72,6 +81,8 @@ def run(captured_date=None):
     print("Stages:")
     for stage, count in stage_counts.most_common():
         print(f"  {stage:<10} {count}")
+
+    print(f"Product categories inferred for {products_processed} trends")
 
     return records
 

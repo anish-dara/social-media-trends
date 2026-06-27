@@ -152,3 +152,29 @@ def get_window_trends(conn, window_days, category=None, trend_type=None, stage=N
         record["persistence_ratio"] = record["days_present"] / effective_window
         results.append(record)
     return results
+
+
+def upsert_trend_products(conn, trend_id, generated_date, product_categories=None, named_products=None):
+    """
+    One row per trend per day. ON CONFLICT (trend_id, generated_date) updates
+    so reruns are idempotent. Tier 1 (product_categories) and Tier 2
+    (named_products) can be written independently -- COALESCE keeps whichever
+    tier already ran today if this call only supplies the other one.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO trend_products (trend_id, generated_date, product_categories, named_products)
+            VALUES (%(trend_id)s, %(generated_date)s, %(product_categories)s, %(named_products)s)
+            ON CONFLICT (trend_id, generated_date) DO UPDATE
+                SET product_categories = COALESCE(EXCLUDED.product_categories, trend_products.product_categories),
+                    named_products = COALESCE(EXCLUDED.named_products, trend_products.named_products)
+            """,
+            {
+                "trend_id": trend_id,
+                "generated_date": generated_date,
+                "product_categories": _as_jsonb(product_categories),
+                "named_products": _as_jsonb(named_products),
+            },
+        )
+    conn.commit()

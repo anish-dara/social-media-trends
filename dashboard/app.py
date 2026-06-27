@@ -34,7 +34,7 @@ def _display(records):
 st.set_page_config(page_title="TrendRadar", layout="wide")
 st.title("TrendRadar")
 
-trends_tab, about_tab = st.tabs(["Trends", "About"])
+trends_tab, retailer_tab, about_tab = st.tabs(["Trends", "Retailer view", "About"])
 
 with trends_tab:
     conn = db.connect()
@@ -139,6 +139,83 @@ with trends_tab:
                     "demographics endpoint requires a logged-in TikTok Ads session, which "
                     "this project deliberately avoids -- see PROJECT_PLAN.md."
                 )
+
+with retailer_tab:
+    st.subheader("Durable trends → what a store could stock")
+    st.caption(
+        "Trends ranked by how consistently they appear (durable, not one-day "
+        "flashes), each mapped to retail product categories a store could act "
+        "on. Product suggestions are generated daily for the top trends."
+    )
+
+    conn_r = db.connect()
+    if conn_r.execute("SELECT MAX(captured_date) FROM snapshots").fetchone()[0] is None:
+        st.info("No data yet -- run `python -m src.pipeline`.")
+    else:
+        r_cols = st.columns(3)
+        with r_cols[0]:
+            r_window = st.selectbox("Window", ["Weekly", "Monthly", "Daily"], key="retailer_window")
+            r_window_days = {"Daily": 1, "Weekly": 7, "Monthly": 30}[r_window]
+        with r_cols[1]:
+            r_category = st.selectbox("Category", ["All"] + TAXONOMY, key="retailer_category")
+        with r_cols[2]:
+            durable_rising = st.checkbox("Durable + rising only", value=False)
+
+        r_results = db.get_window_trends(
+            conn_r, r_window_days,
+            category=None if r_category == "All" else r_category,
+            stage="rising" if durable_rising else None,
+            sort_by="persistence",
+        )
+
+        # Pull today's product suggestions for these trends in one query.
+        latest_products_date = conn_r.execute(
+            "SELECT MAX(generated_date) FROM trend_products"
+        ).fetchone()[0]
+        products_by_trend = {}
+        if latest_products_date is not None and r_results:
+            prod_rows = conn_r.execute(
+                """
+                SELECT trend_id, product_categories, named_products
+                FROM trend_products
+                WHERE generated_date = %s AND trend_id = ANY(%s)
+                """,
+                (latest_products_date, [r["id"] for r in r_results]),
+            ).fetchall()
+            products_by_trend = {tid: (pc, np) for tid, pc, np in prod_rows}
+
+        shown = 0
+        for r in r_results:
+            product_data = products_by_trend.get(r["id"])
+            categories = (product_data[0] or {}).get("categories", []) if product_data else []
+            named = (product_data[1] or {}).get("named_products", []) if product_data else []
+            if not categories and not named:
+                continue  # no retail angle inferred -- don't show an empty card
+            shown += 1
+
+            stage_label = f"{STAGE_EMOJI.get(r['stage'], '')} {r['stage']}"
+            persistence = f"{r['days_present']}/{r['effective_window']} days"
+            st.markdown(f"### {r['name']}  ·  {r['category'] or 'other'}")
+            st.caption(f"{stage_label} · appeared {persistence}")
+            if categories:
+                st.markdown("**Stock:** " + " · ".join(categories))
+            rationale = (product_data[0] or {}).get("rationale", "") if product_data else ""
+            if rationale:
+                st.caption(rationale)
+            if named:
+                named_str = ", ".join(
+                    f"{n.get('product', '')}" + (f" ({n['brand']})" if n.get("brand") else "")
+                    for n in named
+                )
+                st.markdown("**People are using:** " + named_str)
+            st.divider()
+
+        if shown == 0:
+            st.info(
+                "No product suggestions for this view yet. They're generated for "
+                "the top trends each daily run -- widen the window or run "
+                "`python -m src.pipeline`."
+            )
 
 with about_tab:
     st.markdown(

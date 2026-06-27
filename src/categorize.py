@@ -29,7 +29,10 @@ SYSTEM_PROMPT = (
     "no prose, no markdown code fences."
 )
 
-_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+# .strip() guards against a stray newline/space sneaking into the key when
+# it's pasted into .env -- that produces a confusing 401 "invalid x-api-key"
+# even though the key itself is valid.
+_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"].strip())
 
 
 def categorize_batch(names):

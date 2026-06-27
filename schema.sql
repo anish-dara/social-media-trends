@@ -43,3 +43,14 @@ CREATE INDEX IF NOT EXISTS idx_metrics_date_stage ON metrics (computed_date, sta
 -- ALL trends, unlike the (trend_id, captured_date) index above which is
 -- keyed per-trend. See CLAUDE_CODE_PHASE3.md sec 2.3.
 CREATE INDEX IF NOT EXISTS idx_snapshots_captured_date ON snapshots (captured_date);
+
+-- Phase 3 Workstream B: retailer product suggestions derived from trends.
+-- See CLAUDE_CODE_PHASE3.md sec 3.1.
+CREATE TABLE IF NOT EXISTS trend_products (
+    id                 SERIAL PRIMARY KEY,
+    trend_id           INTEGER NOT NULL REFERENCES trends(id),
+    generated_date     DATE NOT NULL,
+    product_categories JSONB,   -- Tier 1: inferred retail categories + rationale
+    named_products     JSONB,   -- Tier 2: extracted product/brand mentions
+    UNIQUE (trend_id, generated_date)
+);
