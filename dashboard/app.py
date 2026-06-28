@@ -168,21 +168,37 @@ with retailer_tab:
             sort_by="persistence",
         )
 
-        # Pull today's product suggestions for these trends in one query.
-        latest_products_date = conn_r.execute(
-            "SELECT MAX(generated_date) FROM trend_products"
-        ).fetchone()[0]
+        # Pull the latest product_categories (Tier 1, written daily by the
+        # cron) and the latest named_products (Tier 2, written by the manual
+        # enrich step) PER TREND, independently. The two tiers commonly land
+        # on different generated_dates, so keying both off one MAX(date) would
+        # drop whichever tier ran on the other day. DISTINCT ON picks each
+        # field's most recent non-null row per trend.
         products_by_trend = {}
-        if latest_products_date is not None and r_results:
-            prod_rows = conn_r.execute(
+        if r_results:
+            trend_ids = [r["id"] for r in r_results]
+            cat_rows = conn_r.execute(
                 """
-                SELECT trend_id, product_categories, named_products
+                SELECT DISTINCT ON (trend_id) trend_id, product_categories
                 FROM trend_products
-                WHERE generated_date = %s AND trend_id = ANY(%s)
+                WHERE trend_id = ANY(%s) AND product_categories IS NOT NULL
+                ORDER BY trend_id, generated_date DESC
                 """,
-                (latest_products_date, [r["id"] for r in r_results]),
+                (trend_ids,),
             ).fetchall()
-            products_by_trend = {tid: (pc, np) for tid, pc, np in prod_rows}
+            named_rows = conn_r.execute(
+                """
+                SELECT DISTINCT ON (trend_id) trend_id, named_products
+                FROM trend_products
+                WHERE trend_id = ANY(%s) AND named_products IS NOT NULL
+                ORDER BY trend_id, generated_date DESC
+                """,
+                (trend_ids,),
+            ).fetchall()
+            cats = dict(cat_rows)
+            nameds = dict(named_rows)
+            for tid in set(cats) | set(nameds):
+                products_by_trend[tid] = (cats.get(tid), nameds.get(tid))
 
         shown = 0
         for r in r_results:

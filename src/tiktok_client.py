@@ -144,12 +144,22 @@ OEMBED_URL = "https://www.tiktok.com/oembed"
 
 def get_hashtag_video_urls(hashtag_id, cookie_header, csrf_token, time_range=90):
     """
-    Top videos' URLs for one hashtag, via the login-gated GetHashtagDetail.
-    `cookie_header` is the raw Cookie string from a logged-in Creative Center
-    session; `csrf_token` is the csrftoken cookie's value (sent as X-CSRFToken).
-    Returns a list of video URL strings (may be empty). Raises on a non-200 or
-    an InvalidLogin BaseResp so the caller can report a stale/absent session
-    clearly rather than silently producing nothing.
+    Canonical web URLs for a hashtag's top videos, via the login-gated
+    GetHashtagDetail. `cookie_header` is the raw Cookie string from a logged-in
+    Creative Center session; `csrf_token` is the csrftoken cookie's value (sent
+    as X-CSRFToken).
+
+    Each videoList item carries `itemID` (the real video ID) plus a `videoURL`
+    object whose `.default` is a raw CDN *media* URL -- NOT a page URL, and
+    oEmbed can't resolve those. So we build the canonical
+    https://www.tiktok.com/@x/video/<itemID> form from itemID instead. The
+    username segment is irrelevant: oEmbed resolves purely by the video ID
+    (confirmed -- @placeholder / @tiktok / @_ all return the same caption).
+
+    Returns a list of URL strings (empty if this hashtag has no detail videos --
+    some don't). Raises on a non-200 or an InvalidLogin BaseResp so the caller
+    can report a stale/absent session clearly rather than silently produce
+    nothing.
     """
     headers = {
         **HEADERS,
@@ -169,7 +179,10 @@ def get_hashtag_video_urls(hashtag_id, cookie_header, csrf_token, time_range=90)
     if base.get("StatusCode") not in (0, None):
         raise RuntimeError(f"GetHashtagDetail returned {base.get('StatusMessage')!r} "
                            f"(login likely expired or missing)")
-    return [v.get("videoURL") for v in data.get("videoList", []) if v.get("videoURL")]
+    return [
+        f"https://www.tiktok.com/@x/video/{v['itemID']}"
+        for v in data.get("videoList", []) if v.get("itemID")
+    ]
 
 
 def get_video_caption(video_url):
