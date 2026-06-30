@@ -241,9 +241,12 @@ with influencers_tab:
         "Aggregated from the top creators TikTok lists for each trending "
         "hashtag (no extra data collection). Ranked by breadth -- how many "
         "distinct trending hashtags a creator appears on -- then followers. "
-        "Per-creator product attribution needs a separate Creators-page "
-        "capture; for now, see the Retailer view for products surfacing in "
-        "trending content."
+        "**Surfacing** shows products appearing in the videos of the hashtags "
+        "a creator is top on: an associative signal -- \"creators in this "
+        "space are surfacing these products\" -- not direct attribution. "
+        "TikTok exposes no creator-to-video link (its Creator Trends tab is "
+        "still \"coming soon\"), so true per-creator attribution isn't "
+        "possible from this source yet."
     )
 
     conn_i = db.connect()
@@ -276,6 +279,7 @@ with influencers_tab:
                     "trending hashtags": r["hashtag_count"],
                     "categories": ", ".join(r["categories"]),
                     "appears on": ", ".join(r["hashtags"][:8]),
+                    "surfacing": ", ".join(r["surfacing_products"][:8]),
                 }
                 for r in influencers[:100]
             ],

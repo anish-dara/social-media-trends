@@ -207,6 +207,32 @@ def get_top_influencers(conn, window_days, category=None):
         )
         rows = cur.fetchall()
 
+        # hashtag name -> named product labels (latest Tier 2 run), for the
+        # associative creator->products link. Not true attribution: TikTok
+        # gives top creators per hashtag and top videos per hashtag, but no
+        # creator<->video row (Creator Trends tab still "coming soon"). So this
+        # reads as "creators in this space are surfacing these products."
+        cur.execute(
+            """
+            SELECT t.name, tp.named_products
+            FROM trend_products tp
+            JOIN trends t ON t.id = tp.trend_id
+            WHERE tp.generated_date = (SELECT MAX(generated_date) FROM trend_products)
+              AND tp.named_products IS NOT NULL
+            """
+        )
+        products_by_hashtag = {}
+        for hashtag_name, named in cur.fetchall():
+            items = (named or {}).get("named_products", []) if isinstance(named, dict) else []
+            labels = []
+            for p in items:
+                product = (p.get("product") or "").strip()
+                brand = (p.get("brand") or "").strip()
+                if product:
+                    labels.append(f"{product} ({brand})" if brand else product)
+            if labels:
+                products_by_hashtag[hashtag_name] = labels
+
     creators = {}
     for hashtag_name, cat, raw in rows:
         for c in (raw or {}).get("topCreators", []):
@@ -234,6 +260,9 @@ def get_top_influencers(conn, window_days, category=None):
     for entry in creators.values():
         if category and category not in entry["categories"]:
             continue
+        surfacing = []
+        for h in entry["hashtags"]:
+            surfacing.extend(products_by_hashtag.get(h, []))
         results.append({
             "handle": entry["handle"],
             "nickname": entry["nickname"],
@@ -241,6 +270,7 @@ def get_top_influencers(conn, window_days, category=None):
             "hashtag_count": len(entry["hashtags"]),
             "hashtags": sorted(entry["hashtags"]),
             "categories": sorted(entry["categories"]),
+            "surfacing_products": sorted(set(surfacing)),
         })
     results.sort(key=lambda r: (r["hashtag_count"], r["follower_count"]), reverse=True)
     return results
