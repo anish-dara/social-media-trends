@@ -178,3 +178,69 @@ def upsert_trend_products(conn, trend_id, generated_date, product_categories=Non
             },
         )
     conn.commit()
+
+
+def get_top_influencers(conn, window_days, category=None):
+    """
+    Top creators across the window, aggregated from the `topCreators` block
+    that GetHashtagList returns for every hashtag (already stored in
+    snapshots.raw_json -- no new data collection). A creator's influence here
+    is breadth: how many distinct trending hashtags they're a top creator on
+    in the window. Returns dicts with handle, nickname, follower_count,
+    hashtag_count, and the categories/hashtags they appear under, ranked by
+    hashtag_count then followers. `category` filters to creators appearing on
+    at least one hashtag in that category.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT MAX(captured_date) FROM snapshots")
+        latest = cur.fetchone()[0]
+        if latest is None:
+            return []
+        cur.execute(
+            """
+            SELECT t.name, t.category, s.raw_json
+            FROM snapshots s
+            JOIN trends t ON t.id = s.trend_id
+            WHERE s.captured_date > %s - %s AND s.raw_json IS NOT NULL
+            """,
+            (latest, window_days),
+        )
+        rows = cur.fetchall()
+
+    creators = {}
+    for hashtag_name, cat, raw in rows:
+        for c in (raw or {}).get("topCreators", []):
+            uid = c.get("ttUID")
+            handle = c.get("handleName")
+            if not uid or not handle:
+                continue
+            entry = creators.setdefault(uid, {
+                "handle": handle,
+                "nickname": c.get("nickname"),
+                "follower_count": 0,
+                "hashtags": set(),
+                "categories": set(),
+            })
+            entry["nickname"] = entry["nickname"] or c.get("nickname")
+            try:
+                entry["follower_count"] = max(entry["follower_count"], int(c.get("followedCnt") or 0))
+            except (TypeError, ValueError):
+                pass
+            entry["hashtags"].add(hashtag_name)
+            if cat:
+                entry["categories"].add(cat)
+
+    results = []
+    for entry in creators.values():
+        if category and category not in entry["categories"]:
+            continue
+        results.append({
+            "handle": entry["handle"],
+            "nickname": entry["nickname"],
+            "follower_count": entry["follower_count"],
+            "hashtag_count": len(entry["hashtags"]),
+            "hashtags": sorted(entry["hashtags"]),
+            "categories": sorted(entry["categories"]),
+        })
+    results.sort(key=lambda r: (r["hashtag_count"], r["follower_count"]), reverse=True)
+    return results

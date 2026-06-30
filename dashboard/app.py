@@ -34,7 +34,9 @@ def _display(records):
 st.set_page_config(page_title="TrendRadar", layout="wide")
 st.title("TrendRadar")
 
-trends_tab, retailer_tab, about_tab = st.tabs(["Trends", "Retailer view", "About"])
+trends_tab, retailer_tab, influencers_tab, about_tab = st.tabs(
+    ["Trends", "Retailer view", "Influencers", "About"]
+)
 
 with trends_tab:
     conn = db.connect()
@@ -232,6 +234,58 @@ with retailer_tab:
                 "the top trends each daily run -- widen the window or run "
                 "`python -m src.pipeline`."
             )
+
+with influencers_tab:
+    st.subheader("Top creators driving trending hashtags")
+    st.caption(
+        "Aggregated from the top creators TikTok lists for each trending "
+        "hashtag (no extra data collection). Ranked by breadth -- how many "
+        "distinct trending hashtags a creator appears on -- then followers. "
+        "Per-creator product attribution needs a separate Creators-page "
+        "capture; for now, see the Retailer view for products surfacing in "
+        "trending content."
+    )
+
+    conn_i = db.connect()
+    if conn_i.execute("SELECT MAX(captured_date) FROM snapshots").fetchone()[0] is None:
+        st.info("No data yet -- run `python -m src.pipeline`.")
+    else:
+        i_cols = st.columns(3)
+        with i_cols[0]:
+            i_window = st.selectbox("Window", ["Weekly", "Monthly", "Daily"], key="infl_window")
+            i_window_days = {"Daily": 1, "Weekly": 7, "Monthly": 30}[i_window]
+        with i_cols[1]:
+            i_category = st.selectbox("Category", ["All"] + TAXONOMY, key="infl_category")
+        with i_cols[2]:
+            i_sort = st.selectbox("Sort by", ["Breadth (hashtags)", "Followers"], key="infl_sort")
+
+        influencers = db.get_top_influencers(
+            conn_i, i_window_days,
+            category=None if i_category == "All" else i_category,
+        )
+        if i_sort == "Followers":
+            influencers = sorted(influencers, key=lambda r: r["follower_count"], reverse=True)
+
+        st.caption(f"{len(influencers)} creators")
+        st.dataframe(
+            [
+                {
+                    "creator": f"@{r['handle']}",
+                    "name": r["nickname"],
+                    "followers": r["follower_count"],
+                    "trending hashtags": r["hashtag_count"],
+                    "categories": ", ".join(r["categories"]),
+                    "appears on": ", ".join(r["hashtags"][:8]),
+                }
+                for r in influencers[:100]
+            ],
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "creator": st.column_config.TextColumn("creator"),
+                "followers": st.column_config.NumberColumn("followers", format="%d"),
+            },
+        )
 
 with about_tab:
     st.markdown(
