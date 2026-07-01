@@ -54,3 +54,16 @@ CREATE TABLE IF NOT EXISTS trend_products (
     named_products     JSONB,   -- Tier 2: extracted product/brand mentions
     UNIQUE (trend_id, generated_date)
 );
+
+-- Phase 5 (Predict): daily forward-growth probability per trend, from the
+-- popularity-curve model in src/predict.py. Prototype-grade at current data
+-- volume (see README) -- persisted so predictions can later be scored against
+-- what actually happened, which is how the model earns trust over time.
+CREATE TABLE IF NOT EXISTS predictions (
+    id                  SERIAL PRIMARY KEY,
+    trend_id            INTEGER NOT NULL REFERENCES trends(id),
+    predicted_date      DATE NOT NULL,   -- the capture day the features came from
+    growth_probability  DOUBLE PRECISION,-- P(video_count grows by next capture)
+    model_version       TEXT,            -- so old predictions stay interpretable
+    UNIQUE (trend_id, predicted_date)
+);

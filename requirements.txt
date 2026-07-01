@@ -4,3 +4,4 @@ anthropic
 streamlit
 python-dotenv
 pytest
+scikit-learn

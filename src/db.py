@@ -180,6 +180,27 @@ def upsert_trend_products(conn, trend_id, generated_date, product_categories=Non
     conn.commit()
 
 
+def upsert_prediction(conn, trend_id, predicted_date, growth_probability, model_version):
+    """One forward-growth prediction per trend per day; idempotent on rerun."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO predictions (trend_id, predicted_date, growth_probability, model_version)
+            VALUES (%(trend_id)s, %(predicted_date)s, %(growth_probability)s, %(model_version)s)
+            ON CONFLICT (trend_id, predicted_date) DO UPDATE
+                SET growth_probability = EXCLUDED.growth_probability,
+                    model_version = EXCLUDED.model_version
+            """,
+            {
+                "trend_id": trend_id,
+                "predicted_date": predicted_date,
+                "growth_probability": growth_probability,
+                "model_version": model_version,
+            },
+        )
+    conn.commit()
+
+
 def get_top_influencers(conn, window_days, category=None):
     """
     Top creators across the window, aggregated from the `topCreators` block

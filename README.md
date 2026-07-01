@@ -1,12 +1,14 @@
-# TrendRadar — Phases 1–3
+# TrendRadar — Phases 1–3 + experimental prediction
 
 Daily capture + categorization of trending TikTok hashtags, with velocity/
 acceleration/lifecycle-stage metrics computed from the accumulating history,
 persistence-ranked time-window views, retailer product suggestions derived
-from the trends, and a read-only dashboard. See `PROJECT_PLAN.md` for the full
-thesis, and `CLAUDE_CODE_PHASE1.md` / `CLAUDE_CODE_PHASE2.md` /
-`CLAUDE_CODE_PHASE3.md` for the per-phase build specs (collect → measure →
-insight & products).
+from the trends, a top-creators view, an experimental forward-growth predictor
+trained on real trajectory data, and a read-only dashboard. See
+`PROJECT_PLAN.md` for the full thesis, and `CLAUDE_CODE_PHASE1.md` /
+`CLAUDE_CODE_PHASE2.md` / `CLAUDE_CODE_PHASE3.md` for the per-phase build specs
+(collect → measure → insight & products). The prediction layer is an early
+prototype — see "Prediction" below for its honest status.
 
 ## Setup
 
@@ -125,10 +127,41 @@ Built as a ladder:
 
 - **Tier 3 — real TikTok Shop SKUs with sales signal.** The highest-value
   output (actual products tied to real demand) needs a paid product-data
-  source. This is the budget ask to bring to the lead, with the live
-  A + Tier 1 demo as leverage.
-- **Influencer analysis per category** (original Workstream C) — a fast-follow
-  once A and B land.
+  source (EchoTik etc. — TikTok exposes no public sales API). This is the
+  budget ask to bring to the lead, with the live demo as leverage. The
+  `ECHOTIK_API_KEY` slot is in `.env.example`; the client is intentionally
+  not built until a real endpoint sample confirms its shape.
+
+## Prediction (Phase 5, experimental prototype)
+
+Every hashtag response carries a real **7-day `popularityCurve`** (normalized
+0–100), stored in `snapshots.raw_json` since Phase 1. That's real per-hashtag
+trajectory history, so the predictor trains on **real captured data — never
+fabricated data.** (Synthetic curves appear only in `tests/test_trajectory.py`,
+to exercise the feature math — the legitimate use of synthetic data: testing
+plumbing, not training a model.)
+
+- `src/trajectory.py` — extracts stored curves into two real datasets:
+  a *shape* set (early curve → its own tail) and the *forward* set (a day's
+  early-curve features → did the hashtag's `video_count` actually grow by its
+  next capture). Pure feature functions, unit-tested.
+- `src/predict.py` — a deliberately simple, class-balanced logistic-regression
+  model. Every metric is **out-of-sample (5-fold cross-validated) and compared
+  to a majority-class baseline**, so nothing flatters itself.
+- Runs as an isolated step in the daily pipeline (after products), writing a
+  growth probability per trend to the `predictions` table — persisted so
+  predictions can later be scored against what actually happened.
+
+**Honest status — read before trusting it.** At current volume the *forward*
+model (the real target) scores ROC-AUC ≈ 0.6: barely above a coin flip, and
+below the majority-accuracy baseline. **It is not yet a reliable predictor.**
+The *shape* model scores well (AUC ≈ 0.88) but that's the weaker,
+semi-self-fulfilling task and mainly validates that the features and pipeline
+are correct. The whole point of building it now is that it improves
+automatically as the cron accumulates history and the forward dataset grows —
+the machine is real and runs on real data; it just needs more of it. The
+dashboard's "Prediction (experimental)" tab shows the live metrics next to the
+predictions so the numbers are never oversold.
 
 ## Architecture
 
@@ -145,11 +178,16 @@ Built as a ladder:
   extraction (LLM), reused `claude-sonnet-4-6`.
 - `src/enrich_tier2.py` — manual Tier 2 entry point (login-fed, runs outside
   the cron); see the Tier 2 note above.
-- `src/db.py` — also holds `get_window_trends()` (persistence windows) and
-  `upsert_trend_products()`.
+- `src/db.py` — also holds `get_window_trends()` (persistence windows),
+  `upsert_trend_products()`, `get_top_influencers()`, and `upsert_prediction()`.
+- `src/trajectory.py` — extracts real popularity curves into prediction
+  datasets; pure feature functions.
+- `src/predict.py` — forward-growth model + honest cross-validated evaluation.
 - `src/pipeline.py` — orchestrates one daily run end to end: ingest → compute
-  metrics → infer Tier 1 products (the product step is wrapped/isolated).
-- `dashboard/app.py` — read-only Streamlit view: Trends, Retailer view, About.
+  metrics → Tier 1 products → growth prediction (each added step is
+  wrapped/isolated so its failure can't break ingestion or metrics).
+- `dashboard/app.py` — read-only Streamlit view: Trends, Retailer view,
+  Influencers, Prediction (experimental), About.
 
 ## Known limitations (read before extending)
 

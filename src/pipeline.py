@@ -13,7 +13,7 @@ written) once TikTok ships that data. See PROJECT_PLAN.md.
 import datetime
 from collections import Counter
 
-from src import categorize, compute_metrics, db, normalize, products, tiktok_client
+from src import categorize, compute_metrics, db, normalize, predict, products, tiktok_client
 
 COUNTRY = "US"
 HASHTAG_LIMIT = 30
@@ -69,6 +69,15 @@ def run(captured_date=None):
         except Exception as e:
             print(f"Product inference FAILED (ingestion/metrics unaffected): {e}")
             products_processed = 0
+
+        # Forward-growth prediction, also isolated. Trains on all real history
+        # so far and scores today's trends. Prototype-grade until the dataset
+        # grows (see README) -- and a failure must not break the daily run.
+        try:
+            predictions_stored = predict.compute_and_store(conn, predicted_date=captured_date)
+        except Exception as e:
+            print(f"Prediction FAILED (ingestion/metrics/products unaffected): {e}")
+            predictions_stored = 0
     finally:
         conn.close()
 
@@ -83,6 +92,7 @@ def run(captured_date=None):
         print(f"  {stage:<10} {count}")
 
     print(f"Product categories inferred for {products_processed} trends")
+    print(f"Growth predictions stored for {predictions_stored} trends")
 
     return records
 

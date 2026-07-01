@@ -34,8 +34,8 @@ def _display(records):
 st.set_page_config(page_title="TrendRadar", layout="wide")
 st.title("TrendRadar")
 
-trends_tab, retailer_tab, influencers_tab, about_tab = st.tabs(
-    ["Trends", "Retailer view", "Influencers", "About"]
+trends_tab, retailer_tab, influencers_tab, predict_tab, about_tab = st.tabs(
+    ["Trends", "Retailer view", "Influencers", "Prediction (experimental)", "About"]
 )
 
 with trends_tab:
@@ -290,6 +290,64 @@ with influencers_tab:
                 "followers": st.column_config.NumberColumn("followers", format="%d"),
             },
         )
+
+with predict_tab:
+    st.subheader("Forward-growth prediction")
+    st.warning(
+        "**Experimental prototype.** This model predicts whether a hashtag's "
+        "adoption (video_count) will keep growing by the next capture, from the "
+        "shape of its early popularity curve. It trains only on real captured "
+        "data -- no fabricated data. At the current tiny sample it is NOT yet "
+        "reliable; the honest metrics are shown below so you can judge for "
+        "yourself. It exists now so it can improve automatically as the daily "
+        "cron accumulates history."
+    )
+
+    from src import predict, trajectory
+
+    conn_p = db.connect()
+    Xf, yf, _ = trajectory.build_forward_dataset(conn_p)
+    metrics = predict.evaluate(Xf, yf)
+
+    if metrics.get("skipped"):
+        st.info(f"Not enough data to evaluate yet: {metrics['reason']}.")
+    else:
+        st.markdown("**Honest out-of-sample metrics (5-fold cross-validated):**")
+        m_cols = st.columns(4)
+        m_cols[0].metric("ROC-AUC", metrics["roc_auc"], help="0.5 = coin flip, 1.0 = perfect")
+        m_cols[1].metric("F1 (growth class)", metrics["f1"])
+        m_cols[2].metric("Accuracy", metrics["accuracy"], f"baseline {metrics['baseline_accuracy']}")
+        m_cols[3].metric("Examples", metrics["n"], f"{metrics['positives']} positive")
+        if metrics["roc_auc"] < 0.65:
+            st.caption(
+                "ROC-AUC is close to 0.5 -- the model barely beats chance at this "
+                "data volume. Treat the probabilities below as illustrative of the "
+                "pipeline, not as trustworthy calls yet."
+            )
+
+        latest = conn_p.execute("SELECT MAX(predicted_date) FROM predictions").fetchone()[0]
+        if latest is not None:
+            rows = conn_p.execute(
+                """
+                SELECT t.name, t.category, p.growth_probability,
+                       COALESCE(m.stage, 'new') AS stage
+                FROM predictions p
+                JOIN trends t ON t.id = p.trend_id
+                LEFT JOIN metrics m ON m.trend_id = t.id AND m.computed_date = p.predicted_date
+                WHERE p.predicted_date = %s
+                ORDER BY p.growth_probability DESC
+                """,
+                (latest,),
+            ).fetchall()
+            st.markdown(f"**Predicted growth probability for {latest}:**")
+            st.dataframe(
+                [
+                    {"trend": n, "category": c or "other",
+                     "growth probability": round(pr, 3), "current stage": stg}
+                    for n, c, pr, stg in rows
+                ],
+                width="stretch", hide_index=True,
+            )
 
 with about_tab:
     st.markdown(
