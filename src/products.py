@@ -136,3 +136,44 @@ def compute_and_store_tier1(conn, generated_date, top_n=PRODUCT_TOP_N):
             product_categories=inferred.get(name, {"categories": [], "rationale": ""}),
         )
     return len(candidates)
+
+
+YOUTUBE_PRODUCT_TOP_N = 25
+
+
+def enrich_youtube_products(conn, generated_date, top_n=YOUTUBE_PRODUCT_TOP_N):
+    """
+    Named-product extraction for YouTube trends. Unlike TikTok Tier 2 (which
+    needs login + oEmbed for caption text), YouTube gives us the video's title,
+    description, and tags right in the stored raw_json -- a richer, no-login
+    product source. Scoped to the top `top_n` YouTube videos by views today to
+    control LLM cost. Reuses extract_named_products. Idempotent per day.
+    Returns the number of videos that yielded >=1 named product.
+    """
+    rows = conn.execute(
+        """
+        SELECT t.id, s.raw_json, s.primary_metric
+        FROM snapshots s JOIN trends t ON t.id = s.trend_id
+        WHERE t.platform = 'youtube' AND s.captured_date = %s AND s.raw_json IS NOT NULL
+        ORDER BY s.primary_metric DESC NULLS LAST
+        LIMIT %s
+        """,
+        (generated_date, top_n),
+    ).fetchall()
+
+    found = 0
+    for trend_id, raw, _metric in rows:
+        snippet = (raw or {}).get("snippet", {})
+        text = "\n".join(filter(None, [
+            snippet.get("title", ""),
+            snippet.get("description", ""),
+            " ".join(snippet.get("tags", []) or []),
+        ]))
+        named = extract_named_products([text])
+        db.upsert_trend_products(
+            conn, trend_id, generated_date,
+            named_products={"named_products": named},
+        )
+        if named:
+            found += 1
+    return found

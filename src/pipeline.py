@@ -100,6 +100,14 @@ def run(captured_date=None):
             print(f"Product inference FAILED (ingestion/metrics unaffected): {e}")
             products_processed = 0
 
+        # YouTube named-product extraction (from stored title/description/tags,
+        # no login needed). Isolated like the other product steps.
+        try:
+            yt_products = products.enrich_youtube_products(conn, generated_date=captured_date)
+        except Exception as e:
+            print(f"YouTube product extraction FAILED (rest unaffected): {e}")
+            yt_products = 0
+
         try:
             predictions_stored = predict.compute_and_store(conn, predicted_date=captured_date)
         except Exception as e:
@@ -123,6 +131,7 @@ def run(captured_date=None):
     stage_counts = Counter(m["stage"] for m in metric_results)
     print("Stages:", dict(stage_counts.most_common()))
     print(f"Product categories inferred for {products_processed} trends")
+    print(f"YouTube videos with named products: {yt_products}")
     print(f"Growth predictions stored for {predictions_stored} trends")
     print(f"Cross-platform topics linked: {topics_linked}")
     return ingested
