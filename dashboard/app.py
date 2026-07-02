@@ -163,15 +163,21 @@ with analytics_tab:
     if conn_a.execute("SELECT MAX(captured_date) FROM snapshots").fetchone()[0] is None:
         st.info("No data yet -- run `python -m src.pipeline`.")
     else:
-        # 1. Lifecycle stage mix over time (stacked area) -- the health of the pipeline.
-        st.markdown("**Lifecycle stages over time** -- how the trend pool's mix shifts day to day.")
+        # 1. Lifecycle stage counts over time (lines). "new" is excluded: it's
+        # just "too little history yet" (not a lifecycle signal) and it spikes
+        # with each platform's daily intake, which would otherwise flatten the
+        # actionable stages against the y-axis.
+        st.markdown("**Lifecycle stages over time** -- daily count of trends in "
+                    "each actionable stage (\"new\" excluded).")
         stage_rows = db.get_stage_history(conn_a)
         if stage_rows:
             sdf = pd.DataFrame(stage_rows)
             pivot = sdf.pivot_table(index="date", columns="stage", values="count",
                                     aggfunc="sum", fill_value=0)
-            ordered = [s for s in STAGES if s in pivot.columns]
-            st.area_chart(pivot[ordered])
+            pivot.index = pd.to_datetime(pivot.index)  # proper datetime x-axis
+            ordered = [s for s in STAGES if s in pivot.columns and s != "new"]
+            if ordered:
+                st.line_chart(pivot[ordered], x_label="date", y_label="trends")
 
         c1, c2 = st.columns(2)
         # 2. Category momentum -- where the movement is.
@@ -180,13 +186,14 @@ with analytics_tab:
             cats = db.get_category_breakdown(conn_a, window_days=7)
             if cats:
                 cdf = pd.DataFrame(cats).set_index("category")
-                st.bar_chart(cdf["trends"])
+                st.bar_chart(cdf["trends"], x_label="category", y_label="trends", horizontal=True)
         with c2:
-            st.markdown("**Avg velocity by category** (%/day)")
+            st.markdown("**Avg velocity by category** (fraction/day)")
             if cats:
                 vdf = pd.DataFrame([c for c in cats if c["avg_velocity"] is not None])
                 if not vdf.empty:
-                    st.bar_chart(vdf.set_index("category")["avg_velocity"])
+                    st.bar_chart(vdf.set_index("category")["avg_velocity"],
+                                 x_label="category", y_label="avg velocity/day", horizontal=True)
 
         # 3. Top movers' trajectories (line chart of smoothed count over time).
         st.markdown("**Top movers -- smoothed trajectory over time** (by latest velocity)")
@@ -197,7 +204,9 @@ with analytics_tab:
                 tdf = pd.DataFrame(series, columns=["date", name]).set_index("date")
                 frames.append(tdf)
             if frames:
-                st.line_chart(pd.concat(frames, axis=1))
+                combined = pd.concat(frames, axis=1)
+                combined.index = pd.to_datetime(combined.index)
+                st.line_chart(combined, x_label="date", y_label="smoothed count")
         else:
             st.caption("Not enough history yet for trajectories -- they fill in as the cron runs.")
 
