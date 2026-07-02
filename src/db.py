@@ -311,3 +311,152 @@ def get_top_influencers(conn, window_days, category=None):
         })
     results.sort(key=lambda r: (r["hashtag_count"], r["follower_count"]), reverse=True)
     return results
+
+
+# --- Analytics & marketing views -------------------------------------------
+
+def get_products_to_market(conn, window_days=7, category=None, platform=None):
+    """
+    Specific products to market, synthesized from the named products (Tier 2 /
+    YouTube) mentioned across trends in the last `window_days`. Aggregates by
+    (product, brand) across platforms and scores each by the momentum of the
+    trends it appears in, so the ranking surfaces products riding accelerating
+    trends -- not just frequently mentioned ones.
+
+    Score is transparent and heuristic (NOT verified demand data -- that's the
+    deferred paid Tier 3): trend_count*10 + rising_count*5 + log10(reach+1),
+    where rising_count counts mentioning trends currently rising/cresting and
+    reach is the summed latest metric of those trends (a rough reach proxy;
+    magnitudes aren't comparable across platforms, so reach is a minor term).
+    Each row lists its driving trends so the number is auditable.
+    """
+    import math
+
+    latest = conn.execute("SELECT MAX(generated_date) FROM trend_products").fetchone()[0]
+    if latest is None:
+        return []
+
+    rows = conn.execute(
+        """
+        SELECT t.id, t.name, t.category, t.platform,
+               tp.named_products,
+               COALESCE(m.stage, 'new') AS stage, m.velocity,
+               latest.primary_metric
+        FROM trend_products tp
+        JOIN trends t ON t.id = tp.trend_id
+        LEFT JOIN LATERAL (
+            SELECT primary_metric, captured_date
+            FROM snapshots s WHERE s.trend_id = t.id
+            ORDER BY captured_date DESC LIMIT 1
+        ) latest ON true
+        LEFT JOIN metrics m ON m.trend_id = t.id AND m.computed_date = latest.captured_date
+        WHERE tp.generated_date > %s - %s
+          AND tp.named_products IS NOT NULL
+          AND (%s::text IS NULL OR t.category = %s::text)
+          AND (%s::text IS NULL OR t.platform = %s::text)
+        """,
+        (latest, window_days, category, category, platform, platform),
+    ).fetchall()
+
+    products = {}
+    for tid, tname, cat, platform_, named, stage, velocity, metric in rows:
+        items = (named or {}).get("named_products", []) if isinstance(named, dict) else []
+        for p in items:
+            product = (p.get("product") or "").strip()
+            brand = (p.get("brand") or "").strip()
+            if not product:
+                continue
+            key = (product.lower(), brand.lower())
+            entry = products.setdefault(key, {
+                "product": product, "brand": brand,
+                "trends": {}, "categories": set(), "platforms": set(),
+                "rising_count": 0, "reach": 0,
+            })
+            if tid not in entry["trends"]:
+                entry["trends"][tid] = tname
+                if cat:
+                    entry["categories"].add(cat)
+                entry["platforms"].add(platform_)
+                if stage in ("rising", "cresting"):
+                    entry["rising_count"] += 1
+                entry["reach"] += int(metric or 0)
+
+    results = []
+    for entry in products.values():
+        trend_count = len(entry["trends"])
+        score = trend_count * 10 + entry["rising_count"] * 5 + math.log10(entry["reach"] + 1)
+        results.append({
+            "product": entry["product"],
+            "brand": entry["brand"],
+            "score": round(score, 1),
+            "trend_count": trend_count,
+            "rising_count": entry["rising_count"],
+            "reach": entry["reach"],
+            "categories": sorted(entry["categories"]),
+            "platforms": sorted(entry["platforms"]),
+            "driving_trends": sorted(entry["trends"].values()),
+        })
+    results.sort(key=lambda r: r["score"], reverse=True)
+    return results
+
+
+def get_stage_history(conn):
+    """Per-day count of trends in each lifecycle stage (for a stacked chart)."""
+    rows = conn.execute(
+        """
+        SELECT computed_date, stage, COUNT(*)
+        FROM metrics GROUP BY computed_date, stage ORDER BY computed_date
+        """
+    ).fetchall()
+    return [{"date": d, "stage": s, "count": c} for d, s, c in rows]
+
+
+def get_category_breakdown(conn, window_days=7):
+    """Trend count + average velocity per category over the window."""
+    latest = conn.execute("SELECT MAX(captured_date) FROM snapshots").fetchone()[0]
+    if latest is None:
+        return []
+    rows = conn.execute(
+        """
+        SELECT t.category, COUNT(DISTINCT t.id) AS trends, AVG(m.velocity) AS avg_velocity
+        FROM snapshots s
+        JOIN trends t ON t.id = s.trend_id
+        LEFT JOIN metrics m ON m.trend_id = t.id AND m.computed_date = s.captured_date
+        WHERE s.captured_date > %s - %s
+        GROUP BY t.category ORDER BY trends DESC
+        """,
+        (latest, window_days),
+    ).fetchall()
+    return [{"category": cat or "other", "trends": n,
+             "avg_velocity": float(v) if v is not None else None} for cat, n, v in rows]
+
+
+def get_trend_trajectories(conn, limit=8):
+    """
+    Smoothed-count time series for the top `limit` trends by latest velocity --
+    the movers worth plotting. Returns {trend_name: [(date, smoothed), ...]}.
+    """
+    latest = conn.execute("SELECT MAX(computed_date) FROM metrics").fetchone()[0]
+    if latest is None:
+        return {}
+    top = conn.execute(
+        """
+        SELECT m.trend_id, t.name
+        FROM metrics m JOIN trends t ON t.id = m.trend_id
+        WHERE m.computed_date = %s AND m.velocity IS NOT NULL
+        ORDER BY m.velocity DESC LIMIT %s
+        """,
+        (latest, limit),
+    ).fetchall()
+    trajectories = {}
+    for trend_id, name in top:
+        series = conn.execute(
+            """
+            SELECT computed_date, smoothed_count FROM metrics
+            WHERE trend_id = %s AND smoothed_count IS NOT NULL ORDER BY computed_date
+            """,
+            (trend_id,),
+        ).fetchall()
+        if series:
+            trajectories[name] = [(d, float(sc)) for d, sc in series]
+    return trajectories

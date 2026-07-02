@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import datetime
 
+import pandas as pd
 import streamlit as st
 
 from src import db
@@ -34,9 +35,10 @@ def _display(records):
 st.set_page_config(page_title="TrendRadar", layout="wide")
 st.title("TrendRadar")
 
-trends_tab, retailer_tab, influencers_tab, crossplatform_tab, predict_tab, about_tab = st.tabs(
-    ["Trends", "Retailer view", "Influencers", "Across platforms",
-     "Prediction (experimental)", "About"]
+(trends_tab, analytics_tab, marketing_tab, retailer_tab, influencers_tab,
+ crossplatform_tab, predict_tab, about_tab) = st.tabs(
+    ["Trends", "Analytics", "Marketing", "Retailer view", "Influencers",
+     "Across platforms", "Prediction (experimental)", "About"]
 )
 
 with trends_tab:
@@ -154,6 +156,107 @@ with trends_tab:
                     "demographics endpoint requires a logged-in TikTok Ads session, which "
                     "this project deliberately avoids -- see PROJECT_PLAN.md."
                 )
+
+with analytics_tab:
+    st.subheader("Trend analytics")
+    conn_a = db.connect()
+    if conn_a.execute("SELECT MAX(captured_date) FROM snapshots").fetchone()[0] is None:
+        st.info("No data yet -- run `python -m src.pipeline`.")
+    else:
+        # 1. Lifecycle stage mix over time (stacked area) -- the health of the pipeline.
+        st.markdown("**Lifecycle stages over time** -- how the trend pool's mix shifts day to day.")
+        stage_rows = db.get_stage_history(conn_a)
+        if stage_rows:
+            sdf = pd.DataFrame(stage_rows)
+            pivot = sdf.pivot_table(index="date", columns="stage", values="count",
+                                    aggfunc="sum", fill_value=0)
+            ordered = [s for s in STAGES if s in pivot.columns]
+            st.area_chart(pivot[ordered])
+
+        c1, c2 = st.columns(2)
+        # 2. Category momentum -- where the movement is.
+        with c1:
+            st.markdown("**Trends per category** (last 7 days)")
+            cats = db.get_category_breakdown(conn_a, window_days=7)
+            if cats:
+                cdf = pd.DataFrame(cats).set_index("category")
+                st.bar_chart(cdf["trends"])
+        with c2:
+            st.markdown("**Avg velocity by category** (%/day)")
+            if cats:
+                vdf = pd.DataFrame([c for c in cats if c["avg_velocity"] is not None])
+                if not vdf.empty:
+                    st.bar_chart(vdf.set_index("category")["avg_velocity"])
+
+        # 3. Top movers' trajectories (line chart of smoothed count over time).
+        st.markdown("**Top movers -- smoothed trajectory over time** (by latest velocity)")
+        traj = db.get_trend_trajectories(conn_a, limit=8)
+        if traj:
+            frames = []
+            for name, series in traj.items():
+                tdf = pd.DataFrame(series, columns=["date", name]).set_index("date")
+                frames.append(tdf)
+            if frames:
+                st.line_chart(pd.concat(frames, axis=1))
+        else:
+            st.caption("Not enough history yet for trajectories -- they fill in as the cron runs.")
+
+with marketing_tab:
+    st.subheader("Specific products to market")
+    st.caption(
+        "Concrete products/brands pulled from the videos of trending content "
+        "(TikTok captions + YouTube descriptions), ranked by the momentum of "
+        "the trends they appear in. **Score** = trend_count x10 + rising_count x5 "
+        "+ log10(reach) -- a heuristic marketing shortlist, not verified sales "
+        "data (that's the deferred paid Tier 3). Each product lists the trends "
+        "driving it so the ranking is auditable."
+    )
+    conn_m = db.connect()
+    if conn_m.execute("SELECT MAX(generated_date) FROM trend_products").fetchone()[0] is None:
+        st.info("No product data yet -- run `python -m src.pipeline`.")
+    else:
+        m_cols = st.columns(3)
+        with m_cols[0]:
+            m_window = st.selectbox("Window", ["Weekly", "Monthly", "Daily"], key="mkt_window")
+            m_days = {"Daily": 1, "Weekly": 7, "Monthly": 30}[m_window]
+        with m_cols[1]:
+            m_platform = st.selectbox("Platform", ["All", "tiktok", "youtube"], key="mkt_platform")
+        with m_cols[2]:
+            m_category = st.selectbox("Category", ["All"] + TAXONOMY, key="mkt_category")
+
+        ranked = db.get_products_to_market(
+            conn_m, window_days=m_days,
+            platform=None if m_platform == "All" else m_platform,
+            category=None if m_category == "All" else m_category,
+        )
+        if not ranked:
+            st.info("No named products in this view yet. Widen the window, or the "
+                    "cron needs more caption-rich trending content to mine.")
+        else:
+            top = ranked[:15]
+            chart_df = pd.DataFrame([
+                {"product": (f"{r['product']} ({r['brand']})" if r["brand"] else r["product"]),
+                 "score": r["score"]}
+                for r in top
+            ]).set_index("product")
+            st.bar_chart(chart_df["score"])
+
+            st.dataframe(
+                [
+                    {
+                        "product": r["product"],
+                        "brand": r["brand"] or "-",
+                        "score": r["score"],
+                        "trends": r["trend_count"],
+                        "rising": r["rising_count"],
+                        "platforms": ", ".join(r["platforms"]),
+                        "categories": ", ".join(r["categories"]),
+                        "driving trends": ", ".join(r["driving_trends"][:5]),
+                    }
+                    for r in ranked
+                ],
+                width="stretch", hide_index=True,
+            )
 
 with retailer_tab:
     st.subheader("Durable trends → what a store could stock")
