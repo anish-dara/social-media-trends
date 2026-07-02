@@ -59,19 +59,21 @@ def _load_curve_rows(conn):
     rows = conn.execute(
         """
         SELECT t.id, t.name, t.category, s.captured_date, s.raw_json,
-               s.video_count, s.rank
+               s.primary_metric, s.rank
         FROM snapshots s JOIN trends t ON t.id = s.trend_id
         WHERE s.raw_json IS NOT NULL
         ORDER BY t.id, s.captured_date
         """
     ).fetchall()
     out = []
-    for tid, name, cat, date, raw, vc, rank in rows:
+    for tid, name, cat, date, raw, metric, rank in rows:
+        # popularityCurve is TikTok-only; YouTube snapshots lack it and are
+        # naturally excluded here, so the predictor stays TikTok-only for now.
         curve = [p.get("value") for p in (raw or {}).get("popularityCurve", [])
                  if p.get("value") is not None]
         if len(curve) >= 7:
             out.append({"trend_id": tid, "name": name, "category": cat,
-                        "date": date, "curve": curve[:7], "video_count": vc, "rank": rank})
+                        "date": date, "curve": curve[:7], "metric": metric, "rank": rank})
     return out
 
 
@@ -108,11 +110,11 @@ def build_forward_dataset(conn):
     for captures in by_trend.values():
         captures.sort(key=lambda r: r["date"])
         for cur, nxt in zip(captures, captures[1:]):
-            if not cur["video_count"] or cur["video_count"] <= 0:
+            if not cur["metric"] or cur["metric"] <= 0:
                 continue
             feats = curve_features(cur["curve"])
             feats["log_rank"] = float(np.log1p(cur["rank"] or 0))
-            growth = (nxt["video_count"] - cur["video_count"]) / cur["video_count"]
+            growth = (nxt["metric"] - cur["metric"]) / cur["metric"]
             X.append(feats)
             y.append(int(growth > FORWARD_GROWTH_THRESHOLD))
             meta.append({"name": cur["name"], "from": str(cur["date"]),

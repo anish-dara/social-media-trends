@@ -31,7 +31,7 @@ def compute_and_store(conn, computed_date=None):
     for trend_id in trend_ids:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT captured_date, video_count FROM snapshots WHERE trend_id = %s",
+                "SELECT captured_date, primary_metric FROM snapshots WHERE trend_id = %s",
                 (trend_id,),
             )
             snapshots = [(row[0], row[1]) for row in cur.fetchall() if row[1] is not None]

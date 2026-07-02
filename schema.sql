@@ -55,6 +55,25 @@ CREATE TABLE IF NOT EXISTS trend_products (
     UNIQUE (trend_id, generated_date)
 );
 
+-- Phase 4 (Platform expansion): TikTok + YouTube behind a common shape.
+-- Existing rows are TikTok; this migration preserves them. See PROJECT_PLAN.md.
+ALTER TABLE trends ADD COLUMN IF NOT EXISTS platform TEXT NOT NULL DEFAULT 'tiktok';
+ALTER TABLE trends DROP CONSTRAINT IF EXISTS trends_type_name_country_key;  -- old UNIQUE(type,name,country)
+ALTER TABLE trends DROP CONSTRAINT IF EXISTS trends_platform_type_name_country_key;
+ALTER TABLE trends ADD CONSTRAINT trends_platform_type_name_country_key
+    UNIQUE (platform, type, name, country);
+-- widen the type CHECK: YouTube trends are 'video', not hashtag/sound
+ALTER TABLE trends DROP CONSTRAINT IF EXISTS trends_type_check;
+ALTER TABLE trends ADD CONSTRAINT trends_type_check
+    CHECK (type IN ('hashtag', 'sound', 'video'));
+
+-- snapshots gain a generic metric the engines read regardless of platform
+ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS primary_metric   BIGINT;
+ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS secondary_metric BIGINT;
+-- backfill existing TikTok rows so metrics/prediction history stays identical
+UPDATE snapshots SET primary_metric = video_count WHERE primary_metric IS NULL;
+UPDATE snapshots SET secondary_metric = view_count WHERE secondary_metric IS NULL;
+
 -- Phase 5 (Predict): daily forward-growth probability per trend, from the
 -- popularity-curve model in src/predict.py. Prototype-grade at current data
 -- volume (see README) -- persisted so predictions can later be scored against

@@ -35,16 +35,23 @@ SYSTEM_PROMPT = (
 _client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"].strip())
 
 
-def categorize_batch(names):
+def categorize_batch(names, hints=None):
     """
-    names: list of trend names (e.g. "#cleantok").
-    Returns dict {name: category}. Any name missing from the model's reply,
-    or assigned something outside TAXONOMY, falls back to "other".
+    names: list of trend names (e.g. "#cleantok" or a YouTube video title).
+    hints: optional {name: native_category_hint} -- e.g. YouTube's own
+    category ("Gaming", "Music") -- passed as extra context to sharpen the
+    call. Returns dict {name: category}; anything missing or outside TAXONOMY
+    falls back to "other".
     """
     if not names:
         return {}
 
-    user_prompt = "Classify these TikTok trend names:\n" + "\n".join(names)
+    hints = hints or {}
+    lines = []
+    for name in names:
+        hint = hints.get(name)
+        lines.append(f"{name}  [platform category: {hint}]" if hint else name)
+    user_prompt = "Classify these trend names/titles:\n" + "\n".join(lines)
     response = _client.messages.create(
         model=MODEL,
         max_tokens=2000,

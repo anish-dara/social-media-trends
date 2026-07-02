@@ -45,9 +45,10 @@ with trends_tab:
     if latest_date is None:
         st.info("No snapshots yet -- run `python -m src.pipeline` to capture today's trends.")
     else:
-        st.caption(f"Latest capture: {latest_date} · platform: tiktok (more platforms planned for Phase 4)")
+        platforms = [p for (p,) in conn.execute("SELECT DISTINCT platform FROM trends ORDER BY platform").fetchall()]
+        st.caption(f"Latest capture: {latest_date} · platforms: {', '.join(platforms)}")
 
-        filter_cols = st.columns(5)
+        filter_cols = st.columns(6)
         with filter_cols[0]:
             window_choice = st.selectbox("Window", ["Daily", "Weekly", "Monthly", "Past N days", "Date range"])
         if window_choice == "Daily":
@@ -66,12 +67,14 @@ with trends_tab:
             window_days = max((latest_date - start_date).days + 1, 1)
 
         with filter_cols[1]:
-            category_choice = st.selectbox("Category", ["All"] + TAXONOMY)
+            platform_choice = st.selectbox("Platform", ["All"] + platforms)
         with filter_cols[2]:
-            type_choice = st.selectbox("Type", ["All", "hashtag", "sound"])
+            category_choice = st.selectbox("Category", ["All"] + TAXONOMY)
         with filter_cols[3]:
-            stage_choice = st.selectbox("Stage", ["All"] + STAGES)
+            type_choice = st.selectbox("Type", ["All", "hashtag", "sound", "video"])
         with filter_cols[4]:
+            stage_choice = st.selectbox("Stage", ["All"] + STAGES)
+        with filter_cols[5]:
             sort_choice = st.selectbox("Sort by", list(SORT_OPTIONS.keys()))
 
         results = db.get_window_trends(
@@ -79,6 +82,7 @@ with trends_tab:
             category=None if category_choice == "All" else category_choice,
             trend_type=None if type_choice == "All" else type_choice,
             stage=None if stage_choice == "All" else stage_choice,
+            platform=None if platform_choice == "All" else platform_choice,
             sort_by=SORT_OPTIONS[sort_choice],
         )
 
@@ -111,16 +115,24 @@ with trends_tab:
             else:
                 velocity_display = f"{r['velocity']:+.1%}/day"
             records.append({
+                "platform": r["platform"],
                 "name": r["name"],
                 "category": r["category"] or "other",
                 "stage": f"{STAGE_EMOJI.get(r['stage'], '')} {r['stage']}",
                 "velocity": velocity_display,
                 "persistence": f"{r['days_present']}/{r['effective_window']} days",
                 "rank": r["rank"],
-                "primary_metric": r["primary_metric"],
+                "metric": r["primary_metric"],
                 "smoothed_history": history_by_trend.get(r["id"], []),
             })
 
+        if platform_choice == "All" and len(platforms) > 1:
+            st.caption(
+                "⚠️ The **metric** column is each platform's own unit (TikTok video "
+                "count vs YouTube views) — not comparable in magnitude across "
+                "platforms. Compare by **stage** and **velocity** instead, which are "
+                "relative to each trend itself and mean the same thing everywhere."
+            )
         st.dataframe(
             _display(records),
             width="stretch",

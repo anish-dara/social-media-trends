@@ -132,6 +132,33 @@ Built as a ladder:
   `ECHOTIK_API_KEY` slot is in `.env.example`; the client is intentionally
   not built until a real endpoint sample confirms its shape.
 
+## Platforms (Phase 4)
+
+TrendRadar now ingests **two platforms** behind one generic shape:
+
+- **TikTok** — trending hashtags (anonymous Creative Center scrape; see below).
+- **YouTube** — trending videos via the official **YouTube Data API v3**
+  (`chart=mostPopular`, ~1 quota unit/day of a free 10k budget — no scraping,
+  no login, no bot challenge). Needs `YOUTUBE_API_KEY` in `.env`. All YouTube
+  logic lives in `src/youtube.py`.
+
+Both map onto a shared schema: `trends.platform` distinguishes them, and
+`snapshots.primary_metric` is the platform-agnostic number the velocity/stage
+and prediction engines difference over (TikTok video_count, YouTube view
+count). Existing TikTok rows were migrated in place and backfilled — verified
+identical before/after (no-regression gate). Sources are **isolated in the
+pipeline**: YouTube failing (quota) or TikTok drifting logs an error and the
+run continues with whatever succeeded.
+
+**Cross-platform rule (enforced in the dashboard):** lifecycle **stage** and
+**velocity** are relative to each trend itself and *are* comparable across
+platforms — "rising" means the same thing everywhere. Raw `primary_metric`
+magnitudes are **not** comparable (YouTube views ≫ TikTok video counts,
+different units), so the UI never ranks across platforms by raw metric.
+
+The predictor stays TikTok-only for now: it needs the 7-point popularityCurve,
+which is a TikTok field YouTube doesn't provide.
+
 ## Prediction (Phase 5, experimental prototype)
 
 Every hashtag response carries a real **7-day `popularityCurve`** (normalized
@@ -167,8 +194,9 @@ predictions so the numbers are never oversold.
 
 - `src/tiktok_client.py` — every TikTok Creative Center request. If TikTok
   changes an endpoint, this is the one file to fix.
+- `src/youtube.py` — every YouTube Data API request (trending videos).
 - `src/categorize.py` — every Anthropic API call (topic classification via
-  `claude-sonnet-4-6`).
+  `claude-sonnet-4-6`), now with an optional native category hint per item.
 - `src/normalize.py` — cleans raw client output into DB-ready records.
 - `src/db.py` — Neon Postgres: upsert trend identities, append dated snapshots.
 - `src/metrics.py` — pure velocity/acceleration/stage math, no DB access.
@@ -183,9 +211,10 @@ predictions so the numbers are never oversold.
 - `src/trajectory.py` — extracts real popularity curves into prediction
   datasets; pure feature functions.
 - `src/predict.py` — forward-growth model + honest cross-validated evaluation.
-- `src/pipeline.py` — orchestrates one daily run end to end: ingest → compute
-  metrics → Tier 1 products → growth prediction (each added step is
-  wrapped/isolated so its failure can't break ingestion or metrics).
+- `src/pipeline.py` — orchestrates one daily run end to end: ingest each
+  platform (isolated per source) → compute metrics → Tier 1 products → growth
+  prediction (each added step is wrapped/isolated so its failure can't break
+  the rest).
 - `dashboard/app.py` — read-only Streamlit view: Trends, Retailer view,
   Influencers, Prediction (experimental), About.
 

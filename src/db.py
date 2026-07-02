@@ -23,17 +23,20 @@ def _as_jsonb(value):
 
 def upsert_trend(conn, record):
     """
-    record keys: type, name, tiktok_id, country, category, demographics, captured_date
+    record keys: platform, type, name, tiktok_id, country, category, demographics,
+    captured_date. `platform` defaults to 'tiktok' if absent (back-compat).
     Inserts a new trend row on first sighting (first_seen_date = captured_date),
     or on repeat sightings fetches the existing id and refreshes category/
-    tiktok_id/demographics. Returns the trend's id.
+    tiktok_id/demographics. Returns the trend's id. Identity is per-platform:
+    a hashtag on TikTok and a video on YouTube never collide.
     """
+    record = {"platform": "tiktok", "tiktok_id": None, "demographics": None, **record}
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO trends (type, name, tiktok_id, category, country, first_seen_date, demographics)
-            VALUES (%(type)s, %(name)s, %(tiktok_id)s, %(category)s, %(country)s, %(captured_date)s, %(demographics)s)
-            ON CONFLICT (type, name, country) DO UPDATE
+            INSERT INTO trends (platform, type, name, tiktok_id, category, country, first_seen_date, demographics)
+            VALUES (%(platform)s, %(type)s, %(name)s, %(tiktok_id)s, %(category)s, %(country)s, %(captured_date)s, %(demographics)s)
+            ON CONFLICT (platform, type, name, country) DO UPDATE
                 SET category = EXCLUDED.category,
                     tiktok_id = EXCLUDED.tiktok_id,
                     demographics = EXCLUDED.demographics
@@ -48,17 +51,27 @@ def upsert_trend(conn, record):
 
 def insert_snapshot(conn, trend_id, snapshot):
     """
-    snapshot keys: captured_date, rank, video_count, view_count, trend_direction, raw_json
-    One row per trend per day; ON CONFLICT (trend_id, captured_date) updates so
-    reruns for the same day are idempotent rather than duplicating.
+    snapshot keys: captured_date, rank, primary_metric, secondary_metric,
+    video_count, view_count, trend_direction, raw_json. primary_metric is the
+    platform-agnostic number the metrics/prediction engines difference over
+    (TikTok: video_count; YouTube: view_count). video_count/view_count are kept
+    for TikTok back-compat and default from primary/secondary when not given.
+    One row per trend per day; idempotent on (trend_id, captured_date).
     """
+    snapshot = {"secondary_metric": None, "trend_direction": None, **snapshot}
+    snapshot.setdefault("video_count", snapshot.get("primary_metric"))
+    snapshot.setdefault("view_count", snapshot.get("secondary_metric"))
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO snapshots (trend_id, captured_date, rank, video_count, view_count, trend_direction, raw_json)
-            VALUES (%(trend_id)s, %(captured_date)s, %(rank)s, %(video_count)s, %(view_count)s, %(trend_direction)s, %(raw_json)s)
+            INSERT INTO snapshots (trend_id, captured_date, rank, primary_metric, secondary_metric,
+                                   video_count, view_count, trend_direction, raw_json)
+            VALUES (%(trend_id)s, %(captured_date)s, %(rank)s, %(primary_metric)s, %(secondary_metric)s,
+                    %(video_count)s, %(view_count)s, %(trend_direction)s, %(raw_json)s)
             ON CONFLICT (trend_id, captured_date) DO UPDATE
                 SET rank = EXCLUDED.rank,
+                    primary_metric = EXCLUDED.primary_metric,
+                    secondary_metric = EXCLUDED.secondary_metric,
                     video_count = EXCLUDED.video_count,
                     view_count = EXCLUDED.view_count,
                     trend_direction = EXCLUDED.trend_direction,
@@ -83,18 +96,19 @@ _WINDOW_SORTS = {
 }
 
 
-def get_window_trends(conn, window_days, category=None, trend_type=None, stage=None, sort_by="persistence"):
+def get_window_trends(conn, window_days, category=None, trend_type=None, stage=None,
+                      platform=None, sort_by="persistence"):
     """
     Trends appearing at least once in the last `window_days` calendar days
     (the union over the window, not the intersection -- CLAUDE_CODE_PHASE3.md
     sec 2.1), each with `days_present` (distinct days seen in the window) and
     a cold-start-honest `effective_window` = min(window_days, total distinct
     days collected so far) so early trends don't get penalized for days
-    before collection even started (sec 2.2). `platform` is hardcoded to
-    'tiktok' for now -- there's only one platform until Phase 4 -- and
-    `primary_metric` aliases `video_count` so the shape matches what a future
-    multi-platform column would look like, without adding that column before
-    it's needed.
+    before collection even started (sec 2.2). `platform` (tiktok/youtube)
+    filters to one source when given; `primary_metric` is the platform's own
+    metric (TikTok video_count, YouTube view_count) -- NOT comparable in
+    magnitude across platforms, so the dashboard ranks within a platform or
+    by stage/velocity, never by raw metric across platforms.
     """
     sort_clause = _WINDOW_SORTS.get(sort_by, _WINDOW_SORTS["persistence"])
 
@@ -116,14 +130,14 @@ def get_window_trends(conn, window_days, category=None, trend_type=None, stage=N
                 GROUP BY s.trend_id
             )
             SELECT
-                t.id, t.name, t.type, t.category, 'tiktok' AS platform,
+                t.id, t.name, t.type, t.category, t.platform,
                 iw.days_present,
-                latest.rank, latest.video_count AS primary_metric,
+                latest.rank, latest.primary_metric,
                 COALESCE(m.stage, 'new') AS stage, m.velocity, m.acceleration
             FROM in_window iw
             JOIN trends t ON t.id = iw.trend_id
             JOIN LATERAL (
-                SELECT rank, video_count, captured_date
+                SELECT rank, primary_metric, captured_date
                 FROM snapshots s2
                 WHERE s2.trend_id = t.id
                 ORDER BY captured_date DESC
@@ -133,6 +147,7 @@ def get_window_trends(conn, window_days, category=None, trend_type=None, stage=N
             WHERE (%(category)s::text IS NULL OR t.category = %(category)s::text)
               AND (%(trend_type)s::text IS NULL OR t.type = %(trend_type)s::text)
               AND (%(stage)s::text IS NULL OR COALESCE(m.stage, 'new') = %(stage)s::text)
+              AND (%(platform)s::text IS NULL OR t.platform = %(platform)s::text)
             ORDER BY {sort_clause}
             """,
             {
@@ -140,6 +155,7 @@ def get_window_trends(conn, window_days, category=None, trend_type=None, stage=N
                 "category": category,
                 "trend_type": trend_type,
                 "stage": stage,
+                "platform": platform,
             },
         )
         columns = [desc[0] for desc in cur.description]
