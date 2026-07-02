@@ -1,4 +1,4 @@
-1"""
+"""
 All YouTube Data API v3 calls live in this one file (mirrors tiktok_client.py's
 one-file rule). Official API, free tier: no scraping, no login, no bot
 challenge -- a much cleaner source than TikTok.
