@@ -112,6 +112,60 @@ def extract_named_products(captions):
         return []
 
 
+TIER2_BATCH_SYSTEM_PROMPT = (
+    "You extract concrete product and brand mentions from social video text. "
+    "You are given several items, each with an id and its text (title, "
+    "description, tags). For EACH item, extract the concrete products/brands "
+    "mentioned. Respond with ONLY a JSON object mapping each id to a list of "
+    '{"product": "...", "brand": "...", "mentions": N}. Use an empty string for '
+    "brand if none is named, and an empty list for items with no concrete "
+    "products. Be conservative -- do not invent products that aren't referenced. "
+    "No prose, no markdown fences."
+)
+
+
+TEXT_CAP = 1800       # per-item chars -- long enough to catch mid-description sponsor blocks
+                      # (GamerSupps/KontrolFreek etc.), which a tight cap misses. Input is cheap;
+                      # chunking (below) is what actually bounds the output, so this can be generous.
+BATCH_CHUNK = 10      # items per call -- keeps each call's output JSON under max_tokens
+
+
+def _extract_batch_once(payload):
+    """One batched call over already-capped (id, text) pairs -> {id: [products]}."""
+    body = "\n\n".join(f"id: {i}\ntext:\n{t}" for i, t in payload)
+    response = _client.messages.create(
+        model=MODEL,
+        max_tokens=4000,
+        system=TIER2_BATCH_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": body}],
+    )
+    try:
+        parsed = json.loads(response.content[0].text.strip())
+    except (json.JSONDecodeError, AttributeError):
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {i: (parsed.get(i, []) if isinstance(parsed.get(i, []), list) else []) for i, _t in payload}
+
+
+def extract_named_products_batch(items):
+    """
+    items: list of (id, text). Extracts products for all of them in a few
+    batched calls (vs one call each) -- the daily YouTube pass went from ~25
+    calls to ~2-3. Each item's text is capped (TEXT_CAP) and items are chunked
+    (BATCH_CHUNK) so no single call's output JSON can truncate and break the
+    parse. Returns {id: [named_product dicts]}; empty text is skipped, parse
+    failures yield empty lists.
+    """
+    payload = [(str(i), t.strip()[:TEXT_CAP]) for i, t in items if t and t.strip()]
+    if not payload:
+        return {}
+    out = {}
+    for start in range(0, len(payload), BATCH_CHUNK):
+        out.update(_extract_batch_once(payload[start:start + BATCH_CHUNK]))
+    return out
+
+
 def compute_and_store_tier1(conn, generated_date, top_n=PRODUCT_TOP_N):
     """
     Selects the top `top_n` active trends (by persistence over
@@ -161,7 +215,7 @@ def enrich_youtube_products(conn, generated_date, top_n=YOUTUBE_PRODUCT_TOP_N):
         (generated_date, top_n),
     ).fetchall()
 
-    found = 0
+    items = []
     for trend_id, raw, _metric in rows:
         snippet = (raw or {}).get("snippet", {})
         text = "\n".join(filter(None, [
@@ -169,7 +223,14 @@ def enrich_youtube_products(conn, generated_date, top_n=YOUTUBE_PRODUCT_TOP_N):
             snippet.get("description", ""),
             " ".join(snippet.get("tags", []) or []),
         ]))
-        named = extract_named_products([text])
+        items.append((trend_id, text))
+
+    # One batched call for all videos instead of one per video.
+    products_by_id = extract_named_products_batch(items)
+
+    found = 0
+    for trend_id, _text in items:
+        named = products_by_id.get(str(trend_id), [])
         db.upsert_trend_products(
             conn, trend_id, generated_date,
             named_products={"named_products": named},
