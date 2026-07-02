@@ -74,6 +74,19 @@ ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS secondary_metric BIGINT;
 UPDATE snapshots SET primary_metric = video_count WHERE primary_metric IS NULL;
 UPDATE snapshots SET secondary_metric = view_count WHERE secondary_metric IS NULL;
 
+-- Cross-platform linker: a topic that trends on >=2 platforms the same day.
+-- Each row ties one trend into a named cross-platform topic cluster.
+CREATE TABLE IF NOT EXISTS trend_links (
+    id           SERIAL PRIMARY KEY,
+    linked_date  DATE NOT NULL,
+    topic        TEXT NOT NULL,   -- canonical label from the LLM linker
+    trend_id     INTEGER NOT NULL REFERENCES trends(id),
+    platform     TEXT NOT NULL,
+    UNIQUE (linked_date, topic, trend_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_trend_links_date ON trend_links (linked_date);
+
 -- Phase 5 (Predict): daily forward-growth probability per trend, from the
 -- popularity-curve model in src/predict.py. Prototype-grade at current data
 -- volume (see README) -- persisted so predictions can later be scored against

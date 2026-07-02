@@ -15,7 +15,7 @@ enrichment only). See README.
 import datetime
 from collections import Counter
 
-from src import (categorize, compute_metrics, db, normalize, predict, products,
+from src import (categorize, compute_metrics, db, link, normalize, predict, products,
                  tiktok_client, youtube)
 
 COUNTRY = "US"
@@ -105,6 +105,14 @@ def run(captured_date=None):
         except Exception as e:
             print(f"Prediction FAILED (ingestion/metrics/products unaffected): {e}")
             predictions_stored = 0
+
+        # Cross-platform linking, also isolated. Finds topics trending on >=2
+        # platforms; often 0 when breakout hashtags don't overlap YouTube.
+        try:
+            topics_linked = link.compute_and_store(conn, linked_date=captured_date)
+        except Exception as e:
+            print(f"Cross-platform linking FAILED (rest unaffected): {e}")
+            topics_linked = 0
     finally:
         conn.close()
 
@@ -116,6 +124,7 @@ def run(captured_date=None):
     print("Stages:", dict(stage_counts.most_common()))
     print(f"Product categories inferred for {products_processed} trends")
     print(f"Growth predictions stored for {predictions_stored} trends")
+    print(f"Cross-platform topics linked: {topics_linked}")
     return ingested
 
 

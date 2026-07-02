@@ -159,6 +159,20 @@ different units), so the UI never ranks across platforms by raw metric.
 The predictor stays TikTok-only for now: it needs the 7-point popularityCurve,
 which is a TikTok field YouTube doesn't provide.
 
+### Cross-platform linking
+
+`src/link.py` uses the LLM (same `claude-sonnet-4-6` stack — deliberately no
+LangChain/vector store, which would be overkill at ~60 items/day and weaker on
+cryptic hashtags where world knowledge beats token similarity) to group
+trends that refer to the same real-world topic across platforms — e.g. a
+TikTok `#gta6` and a YouTube "GTA 6 trailer" video. Only groups spanning ≥2
+platforms are kept (the "trending everywhere" subset), stored in `trend_links`
+and shown in the dashboard's "Across platforms" tab. Runs as an isolated daily
+step. **Expect it to be sparse** — TikTok breakout hashtags are often niche and
+don't overlap YouTube; the linker returns 0 rather than forcing weak matches
+(verified: it correctly links `#gta6` ↔ a GTA 6 video in a controlled test, and
+correctly finds nothing when the day's real trends don't overlap).
+
 ## Prediction (Phase 5, experimental prototype)
 
 Every hashtag response carries a real **7-day `popularityCurve`** (normalized
@@ -208,6 +222,8 @@ predictions so the numbers are never oversold.
   the cron); see the Tier 2 note above.
 - `src/db.py` — also holds `get_window_trends()` (persistence windows),
   `upsert_trend_products()`, `get_top_influencers()`, and `upsert_prediction()`.
+- `src/link.py` — LLM cross-platform trend linker (topics trending on 2+
+  platforms).
 - `src/trajectory.py` — extracts real popularity curves into prediction
   datasets; pure feature functions.
 - `src/predict.py` — forward-growth model + honest cross-validated evaluation.
@@ -216,7 +232,7 @@ predictions so the numbers are never oversold.
   prediction (each added step is wrapped/isolated so its failure can't break
   the rest).
 - `dashboard/app.py` — read-only Streamlit view: Trends, Retailer view,
-  Influencers, Prediction (experimental), About.
+  Influencers, Across platforms, Prediction (experimental), About.
 
 ## Known limitations (read before extending)
 

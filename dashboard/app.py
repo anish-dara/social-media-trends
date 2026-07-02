@@ -34,8 +34,9 @@ def _display(records):
 st.set_page_config(page_title="TrendRadar", layout="wide")
 st.title("TrendRadar")
 
-trends_tab, retailer_tab, influencers_tab, predict_tab, about_tab = st.tabs(
-    ["Trends", "Retailer view", "Influencers", "Prediction (experimental)", "About"]
+trends_tab, retailer_tab, influencers_tab, crossplatform_tab, predict_tab, about_tab = st.tabs(
+    ["Trends", "Retailer view", "Influencers", "Across platforms",
+     "Prediction (experimental)", "About"]
 )
 
 with trends_tab:
@@ -302,6 +303,46 @@ with influencers_tab:
                 "followers": st.column_config.NumberColumn("followers", format="%d"),
             },
         )
+
+with crossplatform_tab:
+    st.subheader("Topics trending across platforms")
+    st.caption(
+        "Topics that show up on more than one platform the same day (e.g. a "
+        "TikTok hashtag *and* a related YouTube video), linked semantically by "
+        "the LLM. A trend corroborated across platforms is a stronger signal "
+        "than one seen on a single platform. Expect this to be sparse: TikTok's "
+        "breakout hashtags are often niche and don't overlap YouTube — but the "
+        "matches it does find are the high-signal 'trending everywhere' ones."
+    )
+
+    conn_x = db.connect()
+    latest_link = conn_x.execute("SELECT MAX(linked_date) FROM trend_links").fetchone()[0]
+    if latest_link is None:
+        st.info(
+            "No cross-platform topics found yet. This populates once a topic "
+            "trends on 2+ platforms the same day (needs YouTube + TikTok both "
+            "running, and an actual overlapping topic)."
+        )
+    else:
+        rows = conn_x.execute(
+            """
+            SELECT l.topic, t.platform, t.name, t.category
+            FROM trend_links l JOIN trends t ON t.id = l.trend_id
+            WHERE l.linked_date = %s
+            ORDER BY l.topic, t.platform
+            """,
+            (latest_link,),
+        ).fetchall()
+        by_topic = {}
+        for topic, platform, name, category in rows:
+            by_topic.setdefault(topic, []).append((platform, name, category))
+        st.caption(f"{len(by_topic)} cross-platform topics on {latest_link}")
+        for topic, members in by_topic.items():
+            platforms = sorted({p for p, _, _ in members})
+            st.markdown(f"### {topic}  ·  _{' + '.join(platforms)}_")
+            for platform, name, category in members:
+                st.markdown(f"- **[{platform}]** {name}  ·  _{category or 'other'}_")
+            st.divider()
 
 with predict_tab:
     st.subheader("Forward-growth prediction")
