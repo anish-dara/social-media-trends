@@ -119,16 +119,44 @@ def score_today(conn, model, captured_date):
 def compute_and_store(conn, predicted_date):
     """
     Train on all real data so far, score `predicted_date`'s trends, and upsert
-    the growth probabilities. Returns the number stored (0 if too little data
-    to train yet). Called from the daily pipeline, wrapped so a failure here
-    never touches ingestion/metrics.
+    the growth probabilities. Also records today's out-of-sample AUC to
+    model_metrics so quality can be tracked over time. Returns the number of
+    predictions stored (0 if too little data to train yet). Called from the
+    daily pipeline, wrapped so a failure here never touches ingestion/metrics.
     """
     model = train_forward_model(conn)
     scored = score_today(conn, model, predicted_date)
     for s in scored:
         db_module.upsert_prediction(conn, s["trend_id"], predicted_date,
                                     s["growth_probability"], MODEL_VERSION)
+
+    # Track model quality for this day (skipped-metrics rows aren't stored).
+    Xf, yf, _ = trajectory.build_forward_dataset(conn, as_of=predicted_date)
+    metrics = evaluate(Xf, yf)
+    if not metrics.get("skipped"):
+        db_module.upsert_model_metrics(conn, predicted_date, MODEL_VERSION, metrics)
     return len(scored)
+
+
+def backfill_model_metrics(conn):
+    """
+    One-off: reconstruct the forward dataset as of each past capture day and
+    record its out-of-sample AUC, so the tracking chart shows a real history
+    (how quality moved as data accumulated) instead of starting from today.
+    Honest -- each day is evaluated only on data that existed by then. Returns
+    the number of days stored.
+    """
+    dates = [d for (d,) in conn.execute(
+        "SELECT DISTINCT captured_date FROM snapshots ORDER BY captured_date"
+    ).fetchall()]
+    stored = 0
+    for d in dates:
+        Xf, yf, _ = trajectory.build_forward_dataset(conn, as_of=d)
+        metrics = evaluate(Xf, yf)
+        if not metrics.get("skipped"):
+            db_module.upsert_model_metrics(conn, d, MODEL_VERSION, metrics)
+            stored += 1
+    return stored
 
 
 if __name__ == "__main__":

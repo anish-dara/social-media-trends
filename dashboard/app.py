@@ -479,7 +479,9 @@ with predict_tab:
     else:
         st.markdown("**Honest out-of-sample metrics (5-fold cross-validated):**")
         m_cols = st.columns(4)
-        m_cols[0].metric("ROC-AUC", metrics["roc_auc"], help="0.5 = coin flip, 1.0 = perfect")
+        m_cols[0].metric("Area Under the ROC Curve (ROC-AUC)", metrics["roc_auc"],
+                         help="0.5 = coin flip, 1.0 = perfect. ROC-AUC = Area Under the "
+                              "Receiver Operating Characteristic Curve.")
         m_cols[1].metric("F1 (growth class)", metrics["f1"])
         m_cols[2].metric("Accuracy", metrics["accuracy"], f"baseline {metrics['baseline_accuracy']}")
         m_cols[3].metric("Examples", metrics["n"], f"{metrics['positives']} positive")
@@ -489,6 +491,22 @@ with predict_tab:
                 "data volume. Treat the probabilities below as illustrative of the "
                 "pipeline, not as trustworthy calls yet."
             )
+
+        # Model quality tracked over time (real backfilled history).
+        auc_hist = db.get_model_metrics_history(conn_p)
+        if len(auc_hist) >= 2:
+            st.markdown("**Area Under the ROC Curve (ROC-AUC) over time** -- tracked "
+                        "daily as the dataset grows. Flat near ~0.6 so far: honest "
+                        "signal that early-curve shape alone isn't yet enough to "
+                        "forecast adoption -- watch whether more data / features move it.")
+            adf = pd.DataFrame(auc_hist)
+            adf["date"] = pd.to_datetime(adf["date"])
+            chart = adf.set_index("date")[["roc_auc", "f1"]].rename(
+                columns={"roc_auc": "ROC-AUC", "f1": "F1"})
+            st.line_chart(chart, x_label="date", y_label="score (0-1)")
+            st.caption(f"Dataset growth: {auc_hist[0]['n_examples']} → "
+                       f"{auc_hist[-1]['n_examples']} forward examples over "
+                       f"{len(auc_hist)} days.")
 
         latest = conn_p.execute("SELECT MAX(predicted_date) FROM predictions").fetchone()[0]
         if latest is not None:

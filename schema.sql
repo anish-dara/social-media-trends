@@ -99,3 +99,16 @@ CREATE TABLE IF NOT EXISTS predictions (
     model_version       TEXT,            -- so old predictions stay interpretable
     UNIQUE (trend_id, predicted_date)
 );
+
+-- Daily model quality, so AUC (Area Under the ROC Curve) can be tracked over
+-- time -- the honest "does it improve as data accumulates?" signal.
+CREATE TABLE IF NOT EXISTS model_metrics (
+    id             SERIAL PRIMARY KEY,
+    computed_date  DATE NOT NULL,
+    model_version  TEXT NOT NULL,
+    roc_auc        DOUBLE PRECISION,
+    f1             DOUBLE PRECISION,
+    n_examples     INTEGER,
+    positives      INTEGER,
+    UNIQUE (computed_date, model_version)
+);

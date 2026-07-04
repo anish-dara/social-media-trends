@@ -54,16 +54,23 @@ def curve_features(curve):
     }
 
 
-def _load_curve_rows(conn):
-    """Real stored curves, ordered so each trend's captures are consecutive."""
+def _load_curve_rows(conn, as_of=None):
+    """
+    Real stored curves, ordered so each trend's captures are consecutive.
+    `as_of` bounds to captured_date <= as_of -- used to reconstruct the dataset
+    as it looked on a past day, so the AUC can be backfilled honestly (no
+    peeking at data that didn't exist yet).
+    """
     rows = conn.execute(
         """
         SELECT t.id, t.name, t.category, s.captured_date, s.raw_json,
                s.primary_metric, s.rank
         FROM snapshots s JOIN trends t ON t.id = s.trend_id
         WHERE s.raw_json IS NOT NULL
+          AND (%s::date IS NULL OR s.captured_date <= %s::date)
         ORDER BY t.id, s.captured_date
-        """
+        """,
+        (as_of, as_of),
     ).fetchall()
     out = []
     for tid, name, cat, date, raw, metric, rank in rows:
@@ -94,14 +101,15 @@ def build_shape_dataset(conn):
     return X, y, meta
 
 
-def build_forward_dataset(conn):
+def build_forward_dataset(conn, as_of=None):
     """
     The real forward target. For each snapshot that has a *next* capture of the
     same hashtag, features = that day's early-curve shape + log rank; label =
     did video_count grow by more than FORWARD_GROWTH_THRESHOLD by the next
-    capture. Returns (feature_dicts, labels, meta).
+    capture. `as_of` reconstructs the dataset as of a past day (for AUC
+    backfill). Returns (feature_dicts, labels, meta).
     """
-    rows = _load_curve_rows(conn)
+    rows = _load_curve_rows(conn, as_of=as_of)
     by_trend = {}
     for r in rows:
         by_trend.setdefault(r["trend_id"], []).append(r)

@@ -460,3 +460,38 @@ def get_trend_trajectories(conn, limit=8):
         if series:
             trajectories[name] = [(d, float(sc)) for d, sc in series]
     return trajectories
+
+
+def upsert_model_metrics(conn, computed_date, model_version, metrics):
+    """Store one day's model-quality row (idempotent per date+version) so AUC
+    can be tracked over time. `metrics` is the dict from predict.evaluate()."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO model_metrics (computed_date, model_version, roc_auc, f1, n_examples, positives)
+            VALUES (%(computed_date)s, %(model_version)s, %(roc_auc)s, %(f1)s, %(n)s, %(positives)s)
+            ON CONFLICT (computed_date, model_version) DO UPDATE
+                SET roc_auc = EXCLUDED.roc_auc, f1 = EXCLUDED.f1,
+                    n_examples = EXCLUDED.n_examples, positives = EXCLUDED.positives
+            """,
+            {
+                "computed_date": computed_date,
+                "model_version": model_version,
+                "roc_auc": metrics.get("roc_auc"),
+                "f1": metrics.get("f1"),
+                "n": metrics.get("n"),
+                "positives": metrics.get("positives"),
+            },
+        )
+    conn.commit()
+
+
+def get_model_metrics_history(conn):
+    """AUC/F1/example-count per day (for the 'improving as data grows' chart)."""
+    rows = conn.execute(
+        """
+        SELECT computed_date, roc_auc, f1, n_examples
+        FROM model_metrics WHERE roc_auc IS NOT NULL ORDER BY computed_date
+        """
+    ).fetchall()
+    return [{"date": d, "roc_auc": auc, "f1": f1, "n_examples": n} for d, auc, f1, n in rows]
