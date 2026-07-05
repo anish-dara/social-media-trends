@@ -5,3 +5,5 @@ streamlit
 python-dotenv
 pytest
 scikit-learn
+pandas
+numpy
