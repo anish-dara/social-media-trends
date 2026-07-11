@@ -15,11 +15,12 @@ enrichment only). See README.
 import datetime
 from collections import Counter
 
-from src import (categorize, compute_metrics, db, link, normalize, predict, products,
-                 tiktok_client, youtube)
+from src import (categorize, compute_metrics, db, link, normalize, pinterest,
+                 predict, products, tiktok_client, youtube)
 
 COUNTRY = "US"
 HASHTAG_LIMIT = 30
+PINTEREST_LIMIT = 25
 YOUTUBE_LIMIT = 30
 DEMOGRAPHICS_TOP_N = 20
 
@@ -74,7 +75,29 @@ def _ingest_youtube(conn, captured_date):
     return len(records)
 
 
-SOURCES = [("tiktok", _ingest_tiktok), ("youtube", _ingest_youtube)]
+def _ingest_pinterest(conn, captured_date):
+    """Fetch + categorize + store Pinterest trending searches. Returns count."""
+    records = pinterest.get_trending_searches(limit=PINTEREST_LIMIT, country=COUNTRY)
+    if not records:
+        return 0
+
+    categories = categorize.categorize_batch([r["name"] for r in records])
+    for r in records:
+        trend_id = db.upsert_trend(conn, {
+            "platform": "pinterest", "type": "search", "name": r["name"],
+            "category": categories.get(r["name"], "other"),
+            "country": COUNTRY, "captured_date": captured_date,
+        })
+        db.insert_snapshot(conn, trend_id, {
+            "captured_date": captured_date, "rank": r["rank"],
+            "primary_metric": r["primary_metric"], "secondary_metric": r["secondary_metric"],
+            "raw_json": r["raw"],
+        })
+    return len(records)
+
+
+SOURCES = [("tiktok", _ingest_tiktok), ("youtube", _ingest_youtube),
+           ("pinterest", _ingest_pinterest)]
 
 
 def run(captured_date=None):

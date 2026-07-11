@@ -134,21 +134,29 @@ Built as a ladder:
 
 ## Platforms (Phase 4)
 
-TrendRadar now ingests **two platforms** behind one generic shape:
+TrendRadar ingests **three platforms** behind one generic shape:
 
 - **TikTok** — trending hashtags (anonymous Creative Center scrape; see below).
 - **YouTube** — trending videos via the official **YouTube Data API v3**
   (`chart=mostPopular`, ~1 quota unit/day of a free 10k budget — no scraping,
   no login, no bot challenge). Needs `YOUTUBE_API_KEY` in `.env`. All YouTube
   logic lives in `src/youtube.py`.
+- **Pinterest** — trending searches via `trends.pinterest.com/top_trends_filtered`
+  (no login, no key; confirmed anonymously reachable). Pinterest is a
+  shopping-intent search engine, so its trending terms are retail-native
+  (nails, outfit ideas, dinner ideas, fall outfits) — closer to "what to
+  stock" than any social feed. Uses `trendsPreset=2` (evergreen top trends
+  that persist day to day → real velocity/persistence, vs the churny
+  "breakout" preset). `searchCount` → primary_metric. Logic in
+  `src/pinterest.py`.
 
-Both map onto a shared schema: `trends.platform` distinguishes them, and
+All map onto a shared schema: `trends.platform` distinguishes them, and
 `snapshots.primary_metric` is the platform-agnostic number the velocity/stage
 and prediction engines difference over (TikTok video_count, YouTube view
-count). Existing TikTok rows were migrated in place and backfilled — verified
-identical before/after (no-regression gate). Sources are **isolated in the
-pipeline**: YouTube failing (quota) or TikTok drifting logs an error and the
-run continues with whatever succeeded.
+count, Pinterest search count). Existing rows were migrated in place and
+backfilled — verified identical before/after (no-regression gate). Sources are
+**isolated in the pipeline**: one platform failing (quota, drift) logs an error
+and the run continues with whatever succeeded.
 
 **Cross-platform rule (enforced in the dashboard):** lifecycle **stage** and
 **velocity** are relative to each trend itself and *are* comparable across
