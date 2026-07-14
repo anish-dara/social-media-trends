@@ -25,6 +25,7 @@ STAGE_EMOJI = {"new": "⚪", "rising": "\U0001f7e2", "cresting": "\U0001f7e1",
 STAGES = ["new", "rising", "cresting", "declining", "dormant"]
 SORT_OPTIONS = {"Persistence": "persistence", "Velocity": "velocity",
                  "Metric": "metric", "Rank": "rank"}
+PLATFORM_DISPLAY_CAP = 30  # default view: top N per platform so YouTube (~124/day) doesn't drown the list
 
 
 def _display(records):
@@ -89,9 +90,28 @@ with trends_tab:
             sort_by=SORT_OPTIONS[sort_choice],
         )
 
+        # Default view caps each platform to the top PLATFORM_DISPLAY_CAP (by the
+        # current sort) so YouTube's ~124/day doesn't bury everything. Picking a
+        # specific Category lifts the cap so the dropdowns still surface the full set.
+        total_found = len(results)
+        cap_active = category_choice == "All"
+        if cap_active:
+            per_platform = {}
+            trimmed = []
+            for r in results:
+                p = r["platform"]
+                if per_platform.get(p, 0) < PLATFORM_DISPLAY_CAP:
+                    trimmed.append(r)
+                    per_platform[p] = per_platform.get(p, 0) + 1
+            results = trimmed
+
         effective_window = results[0]["effective_window"] if results else window_days
+        shown_note = (f"showing top {PLATFORM_DISPLAY_CAP} per platform ({len(results)} of "
+                      f"{total_found}) — pick a Category to see all"
+                      if cap_active and len(results) < total_found
+                      else f"{len(results)} trends")
         st.caption(
-            f"{len(results)} trends · window: {effective_window} day"
+            f"{shown_note} · window: {effective_window} day"
             f"{'s' if effective_window != 1 else ''}"
             + (f" (asked for {window_days}, but only {effective_window} days collected so far)"
                if effective_window < window_days else "")
