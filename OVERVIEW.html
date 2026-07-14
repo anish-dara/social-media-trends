@@ -1,0 +1,282 @@
+<style>
+  :root {
+    --ink: #111a21;
+    --bg: #eef1f3;
+    --surface: #ffffff;
+    --muted: #5a6a73;
+    --faint: #84949c;
+    --line: #dfe4e8;
+    --signal: #0c8375;
+    --signal-ink: #075f55;
+    --signal-weak: #dcefec;
+    --rising: #1f9d55;
+    --cresting: #ad741a;
+    --declining: #cf4444;
+    --dormant: #7f8c95;
+    --shadow: 0 1px 2px rgba(16,30,40,.05), 0 8px 24px rgba(16,30,40,.06);
+    --mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #e7eef2;
+      --bg: #0b1015;
+      --surface: #141d24;
+      --muted: #94a6b0;
+      --faint: #64757f;
+      --line: #23303a;
+      --signal: #2fd0bc;
+      --signal-ink: #6fe0d2;
+      --signal-weak: #113330;
+      --rising: #46c46f;
+      --cresting: #d3a12f;
+      --declining: #e5615a;
+      --dormant: #79878f;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"] {
+    --ink: #111a21; --bg: #eef1f3; --surface: #ffffff; --muted: #5a6a73;
+    --faint: #84949c; --line: #dfe4e8; --signal: #0c8375; --signal-ink: #075f55;
+    --signal-weak: #dcefec; --rising: #1f9d55; --cresting: #ad741a;
+    --declining: #cf4444; --dormant: #7f8c95;
+    --shadow: 0 1px 2px rgba(16,30,40,.05), 0 8px 24px rgba(16,30,40,.06);
+  }
+  :root[data-theme="dark"] {
+    --ink: #e7eef2; --bg: #0b1015; --surface: #141d24; --muted: #94a6b0;
+    --faint: #64757f; --line: #23303a; --signal: #2fd0bc; --signal-ink: #6fe0d2;
+    --signal-weak: #113330; --rising: #46c46f; --cresting: #d3a12f;
+    --declining: #e5615a; --dormant: #79878f;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: clamp(1.25rem, 4vw, 3rem) clamp(1.1rem, 4vw, 2.25rem) 4rem; }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--signal-ink); font-weight: 600;
+  }
+  h1 {
+    font-size: clamp(2.1rem, 6vw, 3.1rem); line-height: 1.04; letter-spacing: -.02em;
+    margin: .5rem 0 0; font-weight: 800; text-wrap: balance;
+  }
+  h1 .radar { color: var(--signal); }
+  .lede {
+    font-size: clamp(1.05rem, 2.3vw, 1.28rem); color: var(--muted);
+    margin: 1rem 0 0; max-width: 40ch; text-wrap: pretty;
+  }
+  .turn {
+    margin-top: 1.5rem; padding: 1rem 1.15rem; border-left: 3px solid var(--signal);
+    background: var(--signal-weak); border-radius: 0 8px 8px 0; font-size: 1.02rem;
+  }
+  .turn b { color: var(--ink); }
+
+  section { margin-top: clamp(2.5rem, 6vw, 3.75rem); }
+  h2 {
+    font-size: .8rem; font-family: var(--mono); letter-spacing: .12em;
+    text-transform: uppercase; color: var(--faint); font-weight: 600;
+    margin: 0 0 1.1rem; display: flex; align-items: center; gap: .7rem;
+  }
+  h2::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+  /* stat tiles */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .75rem; }
+  .stat {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 1.1rem 1.15rem; box-shadow: var(--shadow);
+  }
+  .stat .num {
+    font-family: var(--mono); font-size: 1.85rem; font-weight: 600; letter-spacing: -.01em;
+    font-variant-numeric: tabular-nums; color: var(--ink); line-height: 1;
+  }
+  .stat .lab { margin-top: .5rem; font-size: .82rem; color: var(--muted); }
+
+  /* pipeline */
+  .pipe { display: flex; flex-wrap: wrap; align-items: stretch; gap: .6rem; }
+  .step {
+    flex: 1 1 150px; background: var(--surface); border: 1px solid var(--line);
+    border-radius: 12px; padding: 1rem 1.05rem; box-shadow: var(--shadow); position: relative;
+  }
+  .step .k { font-family: var(--mono); font-size: .7rem; color: var(--signal-ink); letter-spacing: .1em; }
+  .step .t { font-weight: 700; margin-top: .35rem; font-size: 1.02rem; }
+  .step .d { font-size: .84rem; color: var(--muted); margin-top: .3rem; }
+  .arrow { align-self: center; color: var(--faint); font-family: var(--mono); font-weight: 700; }
+  .pipe-note {
+    margin-top: .85rem; font-size: .84rem; color: var(--muted); font-family: var(--mono);
+  }
+
+  /* layers */
+  .layers { display: grid; gap: .7rem; }
+  .layer {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 1rem 1.15rem; box-shadow: var(--shadow);
+    display: grid; grid-template-columns: 1fr auto; gap: .3rem 1rem; align-items: start;
+  }
+  .layer .t { font-weight: 700; font-size: 1.02rem; }
+  .layer .d { grid-column: 1 / 2; font-size: .9rem; color: var(--muted); }
+  .layer .d b { color: var(--ink); font-weight: 600; }
+  .chip {
+    grid-row: 1 / 2; grid-column: 2 / 3; justify-self: end;
+    font-family: var(--mono); font-size: .66rem; letter-spacing: .06em; text-transform: uppercase;
+    padding: .28rem .55rem; border-radius: 999px; font-weight: 600; white-space: nowrap;
+    border: 1px solid transparent;
+  }
+  .chip.live { color: var(--rising); background: color-mix(in srgb, var(--rising) 12%, transparent); border-color: color-mix(in srgb, var(--rising) 30%, transparent); }
+  .chip.exp  { color: var(--cresting); background: color-mix(in srgb, var(--cresting) 13%, transparent); border-color: color-mix(in srgb, var(--cresting) 32%, transparent); }
+  .chip.ready{ color: var(--signal-ink); background: var(--signal-weak); border-color: color-mix(in srgb, var(--signal) 30%, transparent); }
+
+  /* lifecycle mini-legend */
+  .legend { display: flex; flex-wrap: wrap; gap: .5rem .9rem; margin-top: .6rem; font-size: .8rem; color: var(--muted); font-family: var(--mono); }
+  .dot { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; margin-right: .35rem; vertical-align: middle; }
+
+  /* honest split */
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+  .col { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 1.1rem 1.2rem; box-shadow: var(--shadow); }
+  .col h3 { margin: 0 0 .6rem; font-size: .95rem; display: flex; align-items: center; gap: .45rem; }
+  .col ul { margin: 0; padding-left: 1.05rem; }
+  .col li { font-size: .9rem; color: var(--muted); margin-bottom: .4rem; }
+  .col li b { color: var(--ink); font-weight: 600; }
+  .solid h3 { color: var(--rising); }
+  .early h3 { color: var(--cresting); }
+
+  .next {
+    background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--signal);
+    border-radius: 8px; padding: 1.15rem 1.25rem; box-shadow: var(--shadow);
+  }
+  .next .t { font-weight: 700; }
+  .next .d { color: var(--muted); font-size: .92rem; margin-top: .35rem; }
+
+  footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--line); font-size: .8rem; color: var(--faint); font-family: var(--mono); }
+
+  .reveal { opacity: 0; transform: translateY(10px); animation: rise .6s cubic-bezier(.2,.7,.2,1) forwards; }
+  .reveal:nth-child(2) { animation-delay: .05s; }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .reveal { animation: none; opacity: 1; transform: none; } }
+
+  @media (max-width: 620px) {
+    .split { grid-template-columns: 1fr; }
+    .arrow { display: none; }
+  }
+</style>
+
+<div class="wrap">
+  <header class="reveal">
+    <div class="eyebrow">TrendRadar · Project Overview</div>
+    <h1>A daily <span class="radar">trend&#8209;intelligence</span> pipeline for retail.</h1>
+    <p class="lede">It watches what's trending across the internet and turns it into what a store should stock — automatically, every day, unattended.</p>
+    <div class="turn">The feedback was: <b>&ldquo;it's just a database.&rdquo;</b> It no longer is. It's an automated, multi&#8209;platform system that measures how fast trends move, names the products behind them, and is accumulating the history a predictor will need.</div>
+  </header>
+
+  <section>
+    <h2>By the numbers</h2>
+    <div class="stats">
+      <div class="stat"><div class="num">22</div><div class="lab">days of unbroken daily collection (Jun 23 → Jul 14)</div></div>
+      <div class="stat"><div class="num">3</div><div class="lab">live platforms + a 4th scaffolded</div></div>
+      <div class="stat"><div class="num">915</div><div class="lab">distinct trends tracked over time</div></div>
+      <div class="stat"><div class="num">2,404</div><div class="lab">dated snapshots — the longitudinal asset</div></div>
+      <div class="stat"><div class="num">6+</div><div class="lab">consecutive clean scheduled runs, no manual touch</div></div>
+      <div class="stat"><div class="num">919</div><div class="lab">trend&#8209;days mapped to retail product categories</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>How it works — one automated daily run</h2>
+    <div class="pipe">
+      <div class="step"><div class="k">01 · CAPTURE</div><div class="t">Collect</div><div class="d">Trending items pulled from every platform.</div></div>
+      <div class="arrow">&rarr;</div>
+      <div class="step"><div class="k">02 · MEASURE</div><div class="t">Momentum</div><div class="d">Velocity, acceleration &amp; lifecycle stage.</div></div>
+      <div class="arrow">&rarr;</div>
+      <div class="step"><div class="k">03 · PRODUCTIZE</div><div class="t">Retail</div><div class="d">Trends &rarr; product categories &amp; names.</div></div>
+      <div class="arrow">&rarr;</div>
+      <div class="step"><div class="k">04 · PREDICT</div><div class="t">Forecast</div><div class="d">Growth model + cross&#8209;platform links.</div></div>
+    </div>
+    <div class="pipe-note">Runs on a schedule at 06:00 UTC via GitHub Actions — no server to babysit, no one pressing a button.</div>
+  </section>
+
+  <section>
+    <h2>What's built</h2>
+    <div class="layers">
+      <div class="layer">
+        <div class="t">Multi-platform collection</div>
+        <span class="chip live">Live</span>
+        <div class="d"><b>TikTok</b> hashtags, <b>YouTube</b> trending videos, and <b>Pinterest</b> shopping searches (nails, outfit ideas, dinner ideas) — each behind one shared schema, isolated so one platform failing never stops the run.</div>
+      </div>
+      <div class="layer">
+        <div class="t">Momentum engine</div>
+        <span class="chip live">Live</span>
+        <div class="d">Every trend gets a <b>velocity</b>, an <b>acceleration</b>, and a <b>lifecycle stage</b> from its own accumulating history. Today: <b>34 rising, 82 cresting, 133 dormant</b>.
+          <span class="legend">
+            <span><span class="dot" style="background:var(--rising)"></span>rising</span>
+            <span><span class="dot" style="background:var(--cresting)"></span>cresting</span>
+            <span><span class="dot" style="background:var(--declining)"></span>declining</span>
+            <span><span class="dot" style="background:var(--dormant)"></span>dormant</span>
+          </span>
+        </div>
+      </div>
+      <div class="layer">
+        <div class="t">Retail intelligence</div>
+        <span class="chip live">Live</span>
+        <div class="d">Each durable trend maps to <b>product categories</b> to stock, plus <b>specific named products</b> mined from the videos themselves (Cyberpunk 2077, GamerSupps, Pandora) — ranked into a marketing shortlist by trend momentum.</div>
+      </div>
+      <div class="layer">
+        <div class="t">Creators &amp; cross-platform corroboration</div>
+        <span class="chip live">Live</span>
+        <div class="d">Top creators per category, and a linker that flags a topic trending on <b>more than one platform</b> at once — a stronger signal than any single feed.</div>
+      </div>
+      <div class="layer">
+        <div class="t">Forward-growth predictor</div>
+        <span class="chip exp">Experimental</span>
+        <div class="d">A model trained <b>only on real captured data</b>, with its accuracy tracked openly over time. Honest status below — it's a prototype, built now so it sharpens as history grows.</div>
+      </div>
+      <div class="layer">
+        <div class="t">Live dashboard</div>
+        <span class="chip live">Live</span>
+        <div class="d">Eight views — trends, analytics graphs, the marketing shortlist, retailer view, influencers, cross-platform, prediction, and an about page — filterable by window, platform, category, and stage.</div>
+      </div>
+      <div class="layer">
+        <div class="t">Real TikTok Shop sales data (EchoTik)</div>
+        <span class="chip ready">Ready</span>
+        <div class="d">The highest-value layer — actual products tied to <b>real demand</b> — is fully wired and dormant, waiting on the subscription key. It switches on with one credential; nothing else to build.</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Honest status</h2>
+    <div class="split">
+      <div class="col solid">
+        <h3>Solid</h3>
+        <ul>
+          <li><b>Reliability:</b> 22 days unbroken, running itself.</li>
+          <li><b>Breadth:</b> three platforms, cleanly extensible — Pinterest was added in a day.</li>
+          <li><b>The core deliverable:</b> trends → products a store can act on, today.</li>
+        </ul>
+      </div>
+      <div class="col early">
+        <h3>Still early (by design)</h3>
+        <ul>
+          <li><b>Prediction:</b> accuracy ~0.56 (near chance). Curve shape alone isn't enough yet — needs more history, tracked transparently rather than faked.</li>
+          <li><b>Youngest platforms:</b> YouTube and Pinterest have only days of history; their momentum sharpens with time.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What's next</h2>
+    <div class="next">
+      <div class="t">Turn on real sales data.</div>
+      <div class="d">The EchoTik integration is built and waiting on the key — the moment it clears, the marketing shortlist goes from &ldquo;products people are talking about&rdquo; to &ldquo;products people are actually buying.&rdquo; After that: let the history deepen so the predictor earns its keep.</div>
+    </div>
+  </section>
+
+  <footer>
+    TrendRadar · figures as of 2026-07-14 · collection began 2026-06-23 · all numbers drawn from the live database.
+  </footer>
+</div>
