@@ -15,12 +15,13 @@ enrichment only). See README.
 import datetime
 from collections import Counter
 
-from src import (categorize, compute_metrics, db, link, normalize, pinterest,
-                 predict, products, tiktok_client, youtube)
+from src import (categorize, compute_metrics, db, echotik, link, normalize,
+                 pinterest, predict, products, tiktok_client, youtube)
 
 COUNTRY = "US"
 HASHTAG_LIMIT = 30
 PINTEREST_LIMIT = 25
+ECHOTIK_LIMIT = 30
 YOUTUBE_LIMIT = 30
 DEMOGRAPHICS_TOP_N = 20
 
@@ -96,8 +97,35 @@ def _ingest_pinterest(conn, captured_date):
     return len(records)
 
 
+def _ingest_echotik(conn, captured_date):
+    """
+    Fetch + store EchoTik TikTok Shop products (real products + sales signal).
+    Dormant until ECHOTIK_API_KEY is set: get_trending_products returns [] with
+    no key, so this no-ops until the subscription is ready. Products are their
+    own category already, so no LLM categorization call is needed.
+    """
+    records = echotik.get_trending_products(limit=ECHOTIK_LIMIT, region=COUNTRY)
+    if not records:
+        return 0
+    for r in records:
+        trend_id = db.upsert_trend(conn, {
+            "platform": "tiktok_shop", "type": "product", "name": r["name"],
+            "tiktok_id": r["external_id"],
+            "category": r["category_hint"] or "other",
+            "country": COUNTRY, "captured_date": captured_date,
+        })
+        db.insert_snapshot(conn, trend_id, {
+            "captured_date": captured_date, "rank": r["rank"],
+            "primary_metric": r["primary_metric"], "secondary_metric": r["secondary_metric"],
+            "raw_json": r["raw"],
+        })
+    return len(records)
+
+
+# EchoTik is included but stays dormant until ECHOTIK_API_KEY is set (its fetch
+# returns [] without a key), so it's safe to leave enabled now.
 SOURCES = [("tiktok", _ingest_tiktok), ("youtube", _ingest_youtube),
-           ("pinterest", _ingest_pinterest)]
+           ("pinterest", _ingest_pinterest), ("tiktok_shop", _ingest_echotik)]
 
 
 def run(captured_date=None):

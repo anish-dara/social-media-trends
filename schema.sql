@@ -62,10 +62,10 @@ ALTER TABLE trends DROP CONSTRAINT IF EXISTS trends_type_name_country_key;  -- o
 ALTER TABLE trends DROP CONSTRAINT IF EXISTS trends_platform_type_name_country_key;
 ALTER TABLE trends ADD CONSTRAINT trends_platform_type_name_country_key
     UNIQUE (platform, type, name, country);
--- widen the type CHECK: YouTube trends are 'video', Pinterest are 'search'
+-- widen the type CHECK: YouTube 'video', Pinterest 'search', EchoTik 'product'
 ALTER TABLE trends DROP CONSTRAINT IF EXISTS trends_type_check;
 ALTER TABLE trends ADD CONSTRAINT trends_type_check
-    CHECK (type IN ('hashtag', 'sound', 'video', 'search'));
+    CHECK (type IN ('hashtag', 'sound', 'video', 'search', 'product'));
 
 -- snapshots gain a generic metric the engines read regardless of platform
 ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS primary_metric   BIGINT;

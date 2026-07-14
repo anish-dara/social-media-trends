@@ -125,12 +125,17 @@ Built as a ladder:
 
 ### Deferred
 
-- **Tier 3 — real TikTok Shop SKUs with sales signal.** The highest-value
-  output (actual products tied to real demand) needs a paid product-data
-  source (EchoTik etc. — TikTok exposes no public sales API). This is the
-  budget ask to bring to the lead, with the live demo as leverage. The
-  `ECHOTIK_API_KEY` slot is in `.env.example`; the client is intentionally
-  not built until a real endpoint sample confirms its shape.
+- **Tier 3 — real TikTok Shop SKUs with sales signal (scaffolded, dormant).**
+  The highest-value output (actual products tied to real demand) comes from a
+  paid provider, **EchoTik** (TikTok exposes no public sales API). The client
+  `src/echotik.py` is built as a **key-gated scaffold**: it's wired into the
+  pipeline as the `tiktok_shop` platform (products become trends with sales as
+  `primary_metric`, flowing through the same velocity/persistence engine) but
+  returns `[]` and no-ops until `ECHOTIK_API_KEY` is set, so it can't affect
+  the daily run. The only unconfirmed bits — EchoTik's exact endpoint path and
+  response field names (their docs are behind login) — are marked `# CONFIRM`
+  in the file, with a 3-step "when the key arrives" checklist in its docstring.
+  Drop in the key + one sample response and it flows end-to-end.
 
 ## Platforms (Phase 4)
 
