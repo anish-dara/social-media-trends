@@ -1,0 +1,9 @@
+# TrendRadar theme — a considered "instrument" palette (cool ink + teal signal),
+# deliberately not Streamlit's default red/Source-Sans look.
+[theme]
+base = "light"
+primaryColor = "#0c8375"
+backgroundColor = "#f1f4f5"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#111a21"
+font = "monospace"

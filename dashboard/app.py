@@ -33,8 +33,74 @@ def _display(records):
     return [{k: v for k, v in r.items() if not k.startswith("_")} for r in records]
 
 
-st.set_page_config(page_title="TrendRadar", layout="wide")
-st.title("TrendRadar")
+st.set_page_config(page_title="TrendRadar", layout="wide", page_icon="◎")
+
+# --- Custom identity: IBM Plex type + cool-ink/teal palette, so it doesn't read
+# as a stock Streamlit app. Font via @import (works on localhost + Cloud);
+# degrades to a system stack if offline.
+st.markdown(
+    """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root { --tr-ink:#111a21; --tr-teal:#0c8375; --tr-line:#dde3e6; --tr-muted:#5a6a73; }
+
+/* base face on everything, then override data bits to mono below */
+html, body, .stApp, .stApp p, .stApp label, .stApp span, .stApp div,
+button, input, select, textarea, [data-baseweb] {
+  font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+}
+.stApp { background: #f1f4f5; }
+
+/* trim the empty top chrome and tighten the page */
+[data-testid="stHeader"] { background: transparent; }
+.block-container { padding-top: 2.2rem; max-width: 1180px; }
+
+/* headings: tighter, heavier, not the default */
+.stApp h1, .stApp h2, .stApp h3 {
+  font-weight: 700; letter-spacing: -0.015em; color: var(--tr-ink);
+}
+.stApp h1 { font-size: 1.9rem; }
+
+/* custom masthead */
+.tr-mast { display:flex; align-items:baseline; gap:.85rem; flex-wrap:wrap;
+  padding-bottom:.9rem; margin-bottom:1.4rem; border-bottom:2px solid var(--tr-ink); }
+.tr-logo { font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:1.55rem;
+  letter-spacing:-.01em; color:var(--tr-ink); }
+.tr-logo .o { color:var(--tr-teal); }
+.tr-tag { font-family:'IBM Plex Mono',monospace; font-size:.74rem; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--tr-muted); }
+
+/* tabs: understated, teal active underline instead of the stock look */
+.stTabs [data-baseweb="tab-list"] { gap:.35rem; border-bottom:1px solid var(--tr-line); }
+.stTabs [data-baseweb="tab"] {
+  font-family:'IBM Plex Mono',monospace; font-size:.82rem; letter-spacing:.02em;
+  padding:.4rem .7rem; color:var(--tr-muted);
+}
+.stTabs [aria-selected="true"] { color:var(--tr-ink) !important; }
+.stTabs [data-baseweb="tab-highlight"] { background:var(--tr-teal); height:2px; }
+
+/* data-ish elements in mono for the instrument feel */
+[data-testid="stMetricValue"], .stDataFrame, code, .stCode,
+[data-testid="stMetricLabel"], [data-testid="stMetricDelta"] {
+  font-family:'IBM Plex Mono', ui-monospace, monospace;
+}
+[data-testid="stMetricValue"] { color: var(--tr-ink); font-weight:600; }
+
+/* buttons/inputs a touch tighter */
+.stSelectbox label, .stNumberInput label, .stDateInput label {
+  font-family:'IBM Plex Mono',monospace; font-size:.72rem !important;
+  letter-spacing:.05em; text-transform:uppercase; color:var(--tr-muted);
+}
+</style>
+
+<div class="tr-mast">
+  <span class="tr-logo"><span class="o">◎</span> TrendRadar</span>
+  <span class="tr-tag">daily trend intelligence · tiktok · youtube · pinterest</span>
+</div>
+""",
+    unsafe_allow_html=True,
+)
 
 (trends_tab, analytics_tab, marketing_tab, retailer_tab, influencers_tab,
  crossplatform_tab, predict_tab, about_tab) = st.tabs(
